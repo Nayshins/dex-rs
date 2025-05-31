@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "dex-rs-types",
+    "dex-rs-core",
+    "dex-rs-exchanges/hyperliquid",
+    "dex-rs-examples"
+]
+
+[workspace.dependencies]
+serde            = { version = "1.0", features = ["derive"] }
+serde_json       = "1.0"
+ordered-float    = "4.2"
+tokio            = { version = "1", features = ["macros","rt-multi-thread"] }
+async-trait      = "0.1"
+thiserror        = "1.0"
+reqwest          = { version = "0.12", features = ["json","rustls-tls"], default-features = false }
+fastwebsockets   = { version = "0.7", default-features = false, features = ["upgrade","simd"] }
+bytes            = "1.6"
+http             = "1.1"
+tracing          = "0.1"
