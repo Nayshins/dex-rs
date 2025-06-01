@@ -1,5 +1,6 @@
 pub mod error;
 pub use error::DexError;
+pub type DexResult<T> = Result<T, DexError>;
 
 pub mod runtime;
 pub use runtime::{Sleep, Spawn};

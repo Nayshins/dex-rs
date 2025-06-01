@@ -18,21 +18,4 @@ pub trait WsStream:
 
 /* ---------- FastWebSocket impl (Tokio) ---------- */
 #[cfg(feature = "rt-tokio")]
-pub mod tokio_fastws {
-    use super::*;
-
-    pub struct FastWsTransport;
-
-    #[async_trait]
-    impl WsTransport for FastWsTransport {
-        async fn connect(
-            &self,
-            _url: &str,
-        ) -> Result<Box<dyn WsStream + Send + Sync + Unpin>, DexError> {
-            // TODO: Implement WebSocket connection
-            Err(DexError::Unsupported(
-                "WebSocket connection not yet implemented",
-            ))
-        }
-    }
-}
+pub mod tokio_fastws;

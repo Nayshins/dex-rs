@@ -1,6 +1,12 @@
 [package]
 name = "dex-rs-examples"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+dex-rs = { path = "..", features = ["hyperliquid"] }
+tokio  = { workspace = true }
+
+[[bin]]
+name = "simple"
+path = "src/simple.rs"

@@ -6,7 +6,7 @@ pub enum DexError {
     Transport(#[from] reqwest::Error),
 
     #[error("WebSocket: {0}")]
-    Ws(String),
+    Ws(#[from] fastwebsockets::Error),
 
     #[error("Parse: {0}")]
     Parse(String),

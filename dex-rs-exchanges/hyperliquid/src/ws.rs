@@ -137,7 +137,7 @@ impl<T: WsTransport> HlWs<T> {
 
         ws.send(Bytes::from(msg.to_string()))
             .await
-            .map_err(|_| DexError::Ws("Failed to send subscription".into()))?;
+            .map_err(DexError::from)?;
 
         let stream_kind = kind;
         tokio::spawn(async move {
