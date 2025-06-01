@@ -84,3 +84,97 @@ async fn test_websocket_streams() {
         }
     }
 }
+
+#[tokio::test]
+#[ignore] // live API calls
+async fn test_new_market_data_endpoints() {
+    let hl = Hyperliquid::builder().testnet().connect().await.unwrap();
+
+    // Test all mids
+    let all_mids = hl.all_mids().await.unwrap();
+    assert!(!all_mids.mids.is_empty());
+    println!("All mids: {:?}", all_mids.mids.keys().take(5).collect::<Vec<_>>());
+
+    // Test meta
+    let meta = hl.meta().await.unwrap();
+    assert!(!meta.assets.is_empty());
+    println!("Assets count: {}", meta.assets.len());
+
+    // Test meta and asset contexts
+    let meta_and_ctxs = hl.meta_and_asset_ctxs().await.unwrap();
+    assert!(!meta_and_ctxs.meta.assets.is_empty());
+    assert!(!meta_and_ctxs.asset_ctxs.is_empty());
+    println!("Asset contexts count: {}", meta_and_ctxs.asset_ctxs.len());
+
+    // Test funding history
+    let end_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let start_time = end_time - (24 * 60 * 60 * 1000); // 24 hours ago
+    
+    let funding_history = hl.funding_history("BTC", start_time, Some(end_time)).await.unwrap();
+    println!("Funding history entries: {}", funding_history.len());
+
+    // Test candle snapshot
+    let candles = hl.candle_snapshot("BTC", "1h", start_time, end_time).await.unwrap();
+    assert!(!candles.0.is_empty());
+    println!("Candles count: {}", candles.0.len());
+}
+
+#[tokio::test]
+#[ignore] // requires valid wallet and live API calls
+async fn test_authenticated_endpoints() {
+    let hl = Hyperliquid::builder()
+        .wallet_env("HL_PK")
+        .testnet()
+        .connect().await.unwrap();
+
+    // Test user state
+    let user_state = hl.user_state().await.unwrap();
+    println!("Account value: {}", user_state.cross_margin_summary.account_value);
+    println!("Positions count: {}", user_state.asset_positions.len());
+
+    // Test open orders
+    let open_orders = hl.open_orders().await.unwrap();
+    println!("Open orders count: {}", open_orders.len());
+
+    // Test user fills
+    let user_fills = hl.user_fills().await.unwrap();
+    println!("Total fills: {}", user_fills.len());
+
+    // Test user fills by time (last 24 hours)
+    let end_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let start_time = end_time - (24 * 60 * 60 * 1000);
+    
+    let recent_fills = hl.user_fills_by_time(start_time, Some(end_time)).await.unwrap();
+    println!("Recent fills: {}", recent_fills.len());
+
+    // Test user fees
+    let user_fees = hl.user_fees().await.unwrap();
+    println!("Total fees: {}", user_fees.total_fees);
+
+    // Test user funding (last 7 days)
+    let start_time_week = end_time - (7 * 24 * 60 * 60 * 1000);
+    let user_funding = hl.user_funding(start_time_week, Some(end_time)).await.unwrap();
+    println!("Funding payments: {}", user_funding.delta.len());
+}
+
+#[tokio::test]
+#[ignore] // live API calls
+async fn test_spot_endpoints() {
+    let hl = Hyperliquid::builder().testnet().connect().await.unwrap();
+
+    // Test spot meta
+    let spot_meta = hl.spot_meta().await.unwrap();
+    assert!(!spot_meta.tokens.is_empty());
+    println!("Spot tokens count: {}", spot_meta.tokens.len());
+
+    // Test spot meta and asset contexts
+    let spot_meta_and_ctxs = hl.spot_meta_and_asset_ctxs().await.unwrap();
+    assert!(!spot_meta_and_ctxs.meta.tokens.is_empty());
+    println!("Spot asset contexts count: {}", spot_meta_and_ctxs.asset_ctxs.len());
+}
