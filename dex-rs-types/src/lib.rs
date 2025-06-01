@@ -1,6 +1,3 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
-use core::fmt;
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 
