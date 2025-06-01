@@ -1,6 +1,24 @@
 [package]
-name = "dex-rs-core"
+name    = "dex-rs-core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+async-trait  = { workspace = true }
+bytes        = { workspace = true }
+http         = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+dex-rs-types = { path = "../dex-rs-types" }
+# Optional, behind features
+tokio        = { workspace = true, optional = true, features = ["macros","rt","time"] }
+reqwest      = { workspace = true, optional = true }
+fastwebsockets = { workspace = true, optional = true }
+futures-core = "0.3"    # Stream/Sink traits
+futures-util = { version = "0.3", features = ["sink"] }   # StreamExt, SinkExt
+
+[features]
+default       = ["http-reqwest", "rt-tokio"]
+http-reqwest  = ["reqwest"]
+rt-tokio      = ["tokio", "fastwebsockets"]
