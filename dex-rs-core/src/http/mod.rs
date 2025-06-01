@@ -22,7 +22,9 @@ pub mod reqwest_impl {
 
     impl ReqwestTransport {
         pub fn new() -> Self {
-            Self { client: Client::builder().user_agent("dex-rs").build().unwrap() }
+            Self {
+                client: Client::builder().user_agent("dex-rs").build().unwrap(),
+            }
         }
     }
 
@@ -52,10 +54,16 @@ pub struct Http {
 }
 
 impl Http {
-    pub fn new(inner: Arc<dyn HttpTransport>) -> Self { Self { inner } }
+    pub fn new(inner: Arc<dyn HttpTransport>) -> Self {
+        Self { inner }
+    }
 
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, DexError> {
-        let req = Request::builder().method("GET").uri(url).body(Vec::new()).unwrap();
+        let req = Request::builder()
+            .method("GET")
+            .uri(url)
+            .body(Vec::new())
+            .unwrap();
         let resp = self.inner.call(req).await?;
         Ok(serde_json::from_slice(resp.body())?)
     }

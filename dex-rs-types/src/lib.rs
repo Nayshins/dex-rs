@@ -3,46 +3,62 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper helpers – panic on NaN only during construction.
 pub type Price = NotNan<f64>;
-pub type Qty   = NotNan<f64>;
+pub type Qty = NotNan<f64>;
 pub type FundingRate = NotNan<f64>;
 
-#[inline] pub fn price(v: f64) -> Price { NotNan::new(v).expect("NaN price") }
-#[inline] pub fn qty  (v: f64) -> Qty   { NotNan::new(v).expect("NaN qty")   }
+#[inline]
+pub fn price(v: f64) -> Price {
+    NotNan::new(v).expect("NaN price")
+}
+#[inline]
+pub fn qty(v: f64) -> Qty {
+    NotNan::new(v).expect("NaN qty")
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Side { Buy, Sell }
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Trade {
-    pub id:    String,
-    pub ts:    u64,        // unix ms
-    pub side:  Side,
-    pub price: Price,
-    pub qty:   Qty,
+pub enum Side {
+    Buy,
+    Sell,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OrderBookLevel { pub price: Price, pub qty: Qty }
+pub struct Trade {
+    pub id: String,
+    pub ts: u64, // unix ms
+    pub side: Side,
+    pub price: Price,
+    pub qty: Qty,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrderBookLevel {
+    pub price: Price,
+    pub qty: Qty,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrderBook {
     pub coin: String,
-    pub ts:   u64,
+    pub ts: u64,
     pub bids: Vec<OrderBookLevel>,
     pub asks: Vec<OrderBookLevel>,
 }
 
 /* -------- account-trading prereqs -------- */
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Tif { Ioc, Gtc, Alo }
+pub enum Tif {
+    Ioc,
+    Gtc,
+    Alo,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrderReq {
-    pub coin:        String,
-    pub is_buy:      bool,
-    pub px:          Price,
-    pub qty:         Qty,
-    pub tif:         Tif,
+    pub coin: String,
+    pub is_buy: bool,
+    pub px: Price,
+    pub qty: Qty,
+    pub tif: Tif,
     pub reduce_only: bool,
 }
 

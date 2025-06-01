@@ -1,7 +1,7 @@
-use async_trait::async_trait;
-use tokio::sync::mpsc;
-use dex_rs_types::{OrderBook, Trade, OrderReq, OrderId};
 use crate::DexError;
+use async_trait::async_trait;
+use dex_rs_types::{OrderBook, OrderId, OrderReq, Trade};
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
 pub struct Position {
@@ -12,15 +12,49 @@ pub struct Position {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum StreamKind { Trades, Bbo, L2Book, Orders, Fills }
+pub enum StreamKind {
+    Trades,
+    Bbo,
+    L2Book,
+    Orders,
+    Fills,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrderEvent {
+    pub coin: String,
+    pub side: String,
+    pub limit_px: String,
+    pub sz: String,
+    pub oid: u64,
+    pub status: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FillEvent {
+    pub coin: String,
+    pub side: String,
+    pub px: String,
+    pub sz: String,
+    pub oid: u64,
+    pub tid: u64,
+    pub time: u64,
+    pub fee: String,
+    pub hash: String,
+}
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Trade(Trade),
-    Bbo { coin: String, bid_px: f64, ask_px: f64 },
+    Bbo {
+        coin: String,
+        bid_px: f64,
+        ask_px: f64,
+    },
     L2(OrderBook),
-    Order(/* … */),
-    Fill(/* … */),
+    Order(OrderEvent),
+    Fill(FillEvent),
 }
 
 #[async_trait]

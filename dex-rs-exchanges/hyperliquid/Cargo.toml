@@ -1,6 +1,28 @@
 [package]
-name = "hyperliquid"
+name    = "dex-rs-hyperliquid"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+# internal
+dex-rs-types = { path = "../../dex-rs-types" }
+dex-rs-core  = { path = "../../dex-rs-core"  }
+
+# workspace re-uses
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+async-trait = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true }
+bytes       = { workspace = true }
+futures-util = "0.3"
+
+# cryptography
+alloy = { version = "0.8", features = ["signer-local", "serde"] }
+
+# messagepack for signing payloads
+rmp-serde = "1.1"
+hex = "0.4"
+
+[features]
+default = []

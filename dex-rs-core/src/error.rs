@@ -26,5 +26,7 @@ pub enum DexError {
 
 /* Blanket From impls for common libs */
 impl From<serde_json::Error> for DexError {
-    fn from(e: serde_json::Error) -> Self { Self::Parse(e.to_string()) }
+    fn from(e: serde_json::Error) -> Self {
+        Self::Parse(e.to_string())
+    }
 }

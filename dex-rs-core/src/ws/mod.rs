@@ -7,15 +7,14 @@ use crate::DexError;
 
 #[async_trait]
 pub trait WsTransport: Send + Sync {
-    async fn connect(
-        &self,
-        url: &str,
-    ) -> Result<Box<dyn WsStream + Send + Sync + Unpin>, DexError>;
+    async fn connect(&self, url: &str)
+        -> Result<Box<dyn WsStream + Send + Sync + Unpin>, DexError>;
 }
 
 pub trait WsStream:
-    Stream<Item = Result<Bytes, DexError>> + Sink<Bytes, Error = DexError>
-{}
+    Stream<Item = Result<Vec<u8>, DexError>> + Sink<Bytes, Error = DexError>
+{
+}
 
 /* ---------- FastWebSocket impl (Tokio) ---------- */
 #[cfg(feature = "rt-tokio")]
@@ -31,7 +30,9 @@ pub mod tokio_fastws {
             _url: &str,
         ) -> Result<Box<dyn WsStream + Send + Sync + Unpin>, DexError> {
             // TODO: Implement WebSocket connection
-            Err(DexError::Unsupported("WebSocket connection not yet implemented"))
+            Err(DexError::Unsupported(
+                "WebSocket connection not yet implemented",
+            ))
         }
     }
 }
