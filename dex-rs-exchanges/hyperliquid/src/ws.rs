@@ -155,7 +155,7 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                     Err(e) => {
                         retry_count += 1;
                         eprintln!("WebSocket error (attempt {}): {:?}", retry_count, e);
-                        
+
                         if retry_count >= MAX_RETRIES {
                             eprintln!("Max retries reached, giving up on WebSocket connection");
                             break;
@@ -166,12 +166,12 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                 // Exponential backoff with simple jitter
                 let delay_ms = std::cmp::min(
                     BASE_DELAY_MS * 2_u64.pow(retry_count.saturating_sub(1)),
-                    MAX_DELAY_MS
+                    MAX_DELAY_MS,
                 );
                 // Simple jitter using retry_count for deterministic but varied delays
                 let jitter = (retry_count as u64 * 137) % (delay_ms / 4 + 1); // Add up to 25% jitter
                 let total_delay = delay_ms + jitter;
-                
+
                 eprintln!("Waiting {}ms before reconnecting...", total_delay);
                 sleep(Duration::from_millis(total_delay)).await;
             }
@@ -242,6 +242,7 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                     .best_ask
                     .parse()
                     .map_err(|_| DexError::Parse("Invalid ask price".into()))?,
+                timestamp: bbo.time,
             }))
         } else {
             Ok(None)
@@ -252,7 +253,7 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
         if let Ok(trades) = serde_json::from_value::<Vec<TradeData>>(val["data"].clone()) {
             if let Some(trade_data) = trades.into_iter().next() {
                 let trade = Trade {
-                    id: trade_data.hash,
+                    id: trade_data.hash.clone(),
                     ts: trade_data.time,
                     side: if trade_data.side == "B" {
                         Side::Buy
@@ -269,6 +270,8 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                         .sz
                         .parse()
                         .map_err(|_| DexError::Parse("Invalid trade size".into()))?),
+                    coin: trade_data.coin,
+                    tid: trade_data.tid,
                 };
                 return Ok(Some(StreamEvent::Trade(trade)));
             }
@@ -282,10 +285,17 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                 .iter()
                 .map(|level| -> Result<OrderBookLevel, DexError> {
                     Ok(OrderBookLevel {
-                        price: price(level.px.parse()
-                            .map_err(|_| DexError::Parse("Invalid L2 bid price".into()))?),
-                        qty: qty(level.sz.parse()
+                        price: price(
+                            level
+                                .px
+                                .parse()
+                                .map_err(|_| DexError::Parse("Invalid L2 bid price".into()))?,
+                        ),
+                        qty: qty(level
+                            .sz
+                            .parse()
                             .map_err(|_| DexError::Parse("Invalid L2 bid quantity".into()))?),
+                        n: level.n,
                     })
                 })
                 .collect();
@@ -295,10 +305,17 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                 .iter()
                 .map(|level| -> Result<OrderBookLevel, DexError> {
                     Ok(OrderBookLevel {
-                        price: price(level.px.parse()
-                            .map_err(|_| DexError::Parse("Invalid L2 ask price".into()))?),
-                        qty: qty(level.sz.parse()
+                        price: price(
+                            level
+                                .px
+                                .parse()
+                                .map_err(|_| DexError::Parse("Invalid L2 ask price".into()))?,
+                        ),
+                        qty: qty(level
+                            .sz
+                            .parse()
                             .map_err(|_| DexError::Parse("Invalid L2 ask quantity".into()))?),
+                        n: level.n,
                     })
                 })
                 .collect();
@@ -328,6 +345,7 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                     oid: update.order.oid,
                     status: update.status,
                     timestamp: update.status_timestamp,
+                    order_timestamp: update.order.timestamp,
                 };
                 return Ok(Some(StreamEvent::Order(order_event)));
             }
@@ -348,6 +366,7 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                     time: fill.time,
                     fee: fill.fee,
                     hash: fill.hash,
+                    user: fills_data.user,
                 };
                 return Ok(Some(StreamEvent::Fill(fill_event)));
             }
@@ -414,11 +433,13 @@ mod tests {
             coin,
             bid_px,
             ask_px,
+            timestamp,
         }) = result
         {
             assert_eq!(coin, "BTC");
             assert_eq!(bid_px, 50000.5);
             assert_eq!(ask_px, 50001.2);
+            assert_eq!(timestamp, 1234567890);
         } else {
             panic!("Expected BBO event");
         }
@@ -590,7 +611,8 @@ mod tests {
         async fn connect(
             &self,
             _url: &str,
-        ) -> Result<Box<dyn dex_rs_core::ws::WsConnection + Send + Sync + Unpin>, DexError> {
+        ) -> Result<Box<dyn dex_rs_core::ws::WsConnection + Send + Sync + Unpin>, DexError>
+        {
             Err(DexError::Unsupported("DummyTransport"))
         }
     }

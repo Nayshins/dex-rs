@@ -20,6 +20,12 @@ pub mod reqwest_impl {
         client: Client,
     }
 
+    impl Default for ReqwestTransport {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl ReqwestTransport {
         pub fn new() -> Self {
             Self {

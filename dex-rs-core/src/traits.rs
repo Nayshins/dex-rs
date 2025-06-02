@@ -29,6 +29,7 @@ pub struct OrderEvent {
     pub oid: u64,
     pub status: String,
     pub timestamp: u64,
+    pub order_timestamp: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,7 @@ pub struct FillEvent {
     pub time: u64,
     pub fee: String,
     pub hash: String,
+    pub user: String,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,7 @@ pub enum StreamEvent {
         coin: String,
         bid_px: f64,
         ask_px: f64,
+        timestamp: u64,
     },
     L2(OrderBook),
     Order(OrderEvent),

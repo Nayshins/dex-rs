@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::mpsc;
 
 use dex_rs_core::{
@@ -47,31 +50,23 @@ impl Hyperliquid {
     /// Get asset index for a given coin symbol by fetching from API
     async fn get_asset_index(&self, coin: &str) -> Result<u32, DexError> {
         let meta = self.rest.meta(None).await?;
-        
+
         // Look for the coin in the universe
         for item in &meta.universe {
             if item.name.eq_ignore_ascii_case(coin) {
                 return Ok(item.index);
             }
         }
-        
+
         Err(DexError::Other(format!("Asset not found: {}", coin)))
     }
 }
 
 /* ---------- builder ---------- */
+#[derive(Default)]
 pub struct HyperliquidBuilder {
     testnet: bool,
     wallet_hex: Option<String>,
-}
-
-impl Default for HyperliquidBuilder {
-    fn default() -> Self {
-        Self {
-            testnet: false,
-            wallet_hex: None,
-        }
-    }
 }
 
 impl HyperliquidBuilder {
@@ -156,8 +151,9 @@ impl PerpDex for Hyperliquid {
     }
 
     async fn cancel(&self, id: OrderId) -> Result<(), DexError> {
-        let oid = id.0.parse::<u64>()
-            .map_err(|e| DexError::Parse(format!("Invalid order ID format: {}", e)))?;
+        let oid =
+            id.0.parse::<u64>()
+                .map_err(|e| DexError::Parse(format!("Invalid order ID format: {}", e)))?;
         let payload = serde_json::json!({ "type":"cancel", "cancels": [{"oid": oid}] });
         self.rest.place_order(payload).await?;
         Ok(())
@@ -428,44 +424,54 @@ mod tests {
                 OrderBookLevel {
                     price: price(50000.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(49999.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(49998.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(49997.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(49996.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
             ],
             asks: vec![
                 OrderBookLevel {
                     price: price(50001.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(50002.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(50003.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(50004.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
                 OrderBookLevel {
                     price: price(50005.0),
                     qty: qty(1.0),
+                    n: 0,
                 },
             ],
         };

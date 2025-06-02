@@ -32,7 +32,12 @@ impl HlSigner {
     }
 
     /// Sign a user action (like placing an order) using MessagePack encoding
-    pub async fn sign_order(&self, ord: &OrderReq, nonce: u64, asset_index: u32) -> Result<String, DexError> {
+    pub async fn sign_order(
+        &self,
+        ord: &OrderReq,
+        nonce: u64,
+        asset_index: u32,
+    ) -> Result<String, DexError> {
         let action = OrderAction::from_req(ord, nonce, asset_index);
         let user_signed_action = UserSignedAction { action };
 
@@ -44,7 +49,7 @@ impl HlSigner {
         let hash = keccak256(&msgpack_bytes);
         let sig = self
             .wallet
-            .sign_hash(&hash.into())
+            .sign_hash(&hash)
             .await
             .map_err(|e| DexError::Other(e.to_string()))?;
 

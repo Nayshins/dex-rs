@@ -28,12 +28,15 @@ pub struct Trade {
     pub side: Side,
     pub price: Price,
     pub qty: Qty,
+    pub coin: String,
+    pub tid: u64, // trade ID from exchange
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrderBookLevel {
     pub price: Price,
     pub qty: Qty,
+    pub n: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -334,6 +337,8 @@ mod tests {
             side: Side::Buy,
             price: p(65000.0),
             qty: qty(0.001),
+            coin: "BTC".into(),
+            tid: 12345,
         };
         let j = serde_json::to_string(&t).unwrap();
         let back: Trade = serde_json::from_str(&j).unwrap();

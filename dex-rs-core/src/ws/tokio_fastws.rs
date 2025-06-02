@@ -2,9 +2,9 @@
 
 use super::*;
 use bytes::Bytes;
-use fastwebsockets::{WebSocket, Frame, OpCode, Payload};
-use tokio::sync::Mutex;
+use fastwebsockets::{Frame, OpCode, Payload, WebSocket};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct FastWsTransport;
@@ -16,18 +16,29 @@ impl WsTransport for FastWsTransport {
         url: &str,
     ) -> Result<Box<dyn WsConnection + Send + Sync + Unpin>, DexError> {
         use http::{Request, Uri};
-        use hyper_util::rt::tokio::TokioExecutor;
         use http_body_util::Empty;
+        use hyper_util::rt::tokio::TokioExecutor;
         use tokio::net::TcpStream;
-        use tokio_rustls::{TlsConnector, rustls::{ClientConfig, RootCertStore, pki_types::ServerName}};
+        use tokio_rustls::{
+            rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
+            TlsConnector,
+        };
         use webpki_roots;
-        
-        let uri: Uri = url.parse().map_err(|e| DexError::Ws(format!("Invalid URL: {}", e)))?;
-        
+
+        let uri: Uri = url
+            .parse()
+            .map_err(|e| DexError::Ws(format!("Invalid URL: {}", e)))?;
+
         let host = uri.host().unwrap_or("localhost").to_string();
-        let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("wss") { 443 } else { 80 });
+        let port = uri
+            .port_u16()
+            .unwrap_or(if uri.scheme_str() == Some("wss") {
+                443
+            } else {
+                80
+            });
         let is_tls = uri.scheme_str() == Some("wss");
-        
+
         let tcp_stream = TcpStream::connect((host.as_str(), port))
             .await
             .map_err(|e| DexError::Ws(format!("Connection failed: {}", e)))?;
@@ -40,43 +51,47 @@ impl WsTransport for FastWsTransport {
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
-            .header("Sec-WebSocket-Key", fastwebsockets::handshake::generate_key())
+            .header(
+                "Sec-WebSocket-Key",
+                fastwebsockets::handshake::generate_key(),
+            )
             .body(Empty::<Bytes>::new())
             .map_err(|e| DexError::Ws(format!("Failed to build request: {}", e)))?;
 
         let executor = TokioExecutor::new();
-        
+
         if is_tls {
             // Set up TLS configuration
             let mut root_store = RootCertStore::empty();
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            
+
             let config = ClientConfig::builder()
                 .with_root_certificates(root_store)
                 .with_no_client_auth();
-            
+
             let connector = TlsConnector::from(Arc::new(config));
             let domain = ServerName::try_from(host.clone())
                 .map_err(|e| DexError::Ws(format!("Invalid hostname: {}", e)))?;
-            
-            let tls_stream = connector.connect(domain, tcp_stream)
+
+            let tls_stream = connector
+                .connect(domain, tcp_stream)
                 .await
                 .map_err(|e| DexError::Ws(format!("TLS connection failed: {}", e)))?;
-            
+
             let (ws, _) = fastwebsockets::handshake::client(&executor, req, tls_stream)
                 .await
                 .map_err(|e| DexError::Ws(format!("WebSocket handshake failed: {}", e)))?;
-            
-            Ok(Box::new(FastWsConnection { 
-                ws: Arc::new(Mutex::new(ws))
+
+            Ok(Box::new(FastWsConnection {
+                ws: Arc::new(Mutex::new(ws)),
             }))
         } else {
             let (ws, _) = fastwebsockets::handshake::client(&executor, req, tcp_stream)
                 .await
                 .map_err(|e| DexError::Ws(format!("WebSocket handshake failed: {}", e)))?;
-            
-            Ok(Box::new(FastWsConnection { 
-                ws: Arc::new(Mutex::new(ws))
+
+            Ok(Box::new(FastWsConnection {
+                ws: Arc::new(Mutex::new(ws)),
             }))
         }
     }
@@ -91,10 +106,11 @@ impl WsConnection for FastWsConnection {
     async fn read_message(&mut self) -> Result<Vec<u8>, DexError> {
         let mut ws = self.ws.lock().await;
         loop {
-            let frame = ws.read_frame()
+            let frame = ws
+                .read_frame()
                 .await
                 .map_err(|e| DexError::Ws(format!("Failed to read frame: {}", e)))?;
-            
+
             match frame.opcode {
                 OpCode::Text | OpCode::Binary => {
                     return Ok(frame.payload.to_vec());
@@ -119,7 +135,7 @@ impl WsConnection for FastWsConnection {
             }
         }
     }
-    
+
     async fn send_message(&mut self, data: Bytes) -> Result<(), DexError> {
         let mut ws = self.ws.lock().await;
         let frame = Frame::text(Payload::Owned(data.to_vec()));
@@ -127,7 +143,7 @@ impl WsConnection for FastWsConnection {
             .await
             .map_err(|e| DexError::Ws(format!("Failed to send message: {}", e)))
     }
-    
+
     async fn close(&mut self) -> Result<(), DexError> {
         let mut ws = self.ws.lock().await;
         let frame = Frame::close(1000, b"");

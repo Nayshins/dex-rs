@@ -46,17 +46,23 @@ impl HlRest {
             .take(limit)
             .map(|r| -> Result<Trade, DexError> {
                 Ok(Trade {
-                    id: r.hash,
+                    id: r.hash.clone(),
                     ts: r.time,
                     side: if r.side == "B" { Side::Buy } else { Side::Sell },
-                    price: price(r.px.parse::<f64>()
-                        .map_err(|_| DexError::Parse("Invalid trade price".into()))?),
-                    qty: qty(r.qty.parse::<f64>()
+                    price: price(
+                        r.px.parse::<f64>()
+                            .map_err(|_| DexError::Parse("Invalid trade price".into()))?,
+                    ),
+                    qty: qty(r
+                        .qty
+                        .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid trade quantity".into()))?),
+                    coin: coin.to_string(),
+                    tid: 0, // HTTP API doesn't provide trade ID
                 })
             })
             .collect();
-        Ok(trades?)
+        trades
     }
 
     /* ----- order-book snapshot ----- */
@@ -90,10 +96,14 @@ impl HlRest {
             .iter()
             .map(|l| -> Result<OrderBookLevel, DexError> {
                 Ok(OrderBookLevel {
-                    price: price(l[0].parse::<f64>()
-                        .map_err(|_| DexError::Parse("Invalid bid price".into()))?),
-                    qty: qty(l[1].parse::<f64>()
+                    price: price(
+                        l[0].parse::<f64>()
+                            .map_err(|_| DexError::Parse("Invalid bid price".into()))?,
+                    ),
+                    qty: qty(l[1]
+                        .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid bid quantity".into()))?),
+                    n: 0,
                 })
             })
             .collect();
@@ -103,10 +113,14 @@ impl HlRest {
             .iter()
             .map(|l| -> Result<OrderBookLevel, DexError> {
                 Ok(OrderBookLevel {
-                    price: price(l[0].parse::<f64>()
-                        .map_err(|_| DexError::Parse("Invalid ask price".into()))?),
-                    qty: qty(l[1].parse::<f64>()
+                    price: price(
+                        l[0].parse::<f64>()
+                            .map_err(|_| DexError::Parse("Invalid ask price".into()))?,
+                    ),
+                    qty: qty(l[1]
+                        .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid ask quantity".into()))?),
+                    n: 0,
                 })
             })
             .collect();
