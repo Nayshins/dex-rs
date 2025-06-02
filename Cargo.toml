@@ -25,16 +25,22 @@ futures-util     = "0.3"
 hex              = "0.4"
 rmp-serde        = "1.1"
 alloy            = { version = "0.8", features = ["signer-local","serde"] }
+hyper            = "1.6"
+hyper-util       = { version = "0.1", features = ["tokio"] }
+http-body-util   = "0.1"
 bytes            = "1.6"
 http             = "1.1"
 tracing          = "0.1"
+rustls           = "0.23"
+tokio-rustls     = "0.26"
+webpki-roots     = "0.26"
 
 [dependencies]
 dex-rs-core        = { path = "./dex-rs-core", version = "0.1.0" }
 dex-rs-types       = { path = "./dex-rs-types", version = "0.1.0" }
 dex-rs-hyperliquid = { path = "./dex-rs-exchanges/hyperliquid", version = "0.1.0", optional = true }
+ordered-float      = { workspace = true }
 
 [features]
 default     = ["hyperliquid"]
 hyperliquid = ["dex-rs-hyperliquid"]
-TOML < /dev/null

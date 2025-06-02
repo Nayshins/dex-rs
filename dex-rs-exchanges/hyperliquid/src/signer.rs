@@ -32,8 +32,8 @@ impl HlSigner {
     }
 
     /// Sign a user action (like placing an order) using MessagePack encoding
-    pub async fn sign_order(&self, ord: &OrderReq, nonce: u64) -> Result<String, DexError> {
-        let action = OrderAction::from_req(ord, nonce);
+    pub async fn sign_order(&self, ord: &OrderReq, nonce: u64, asset_index: u32) -> Result<String, DexError> {
+        let action = OrderAction::from_req(ord, nonce, asset_index);
         let user_signed_action = UserSignedAction { action };
 
         // Hyperliquid requires MessagePack encoding before signing
@@ -90,9 +90,9 @@ struct LimitOrder {
 }
 
 impl OrderAction {
-    fn from_req(req: &OrderReq, nonce: u64) -> Self {
+    fn from_req(req: &OrderReq, nonce: u64, asset_index: u32) -> Self {
         let order = Order {
-            a: 0, // TODO: need proper asset mapping
+            a: asset_index,
             b: req.is_buy,
             p: format!("{}", *req.px),
             s: format!("{}", *req.qty),
@@ -155,7 +155,7 @@ mod tests {
             reduce_only: false,
         };
 
-        let action = OrderAction::from_req(&order_req, 12345);
+        let action = OrderAction::from_req(&order_req, 12345, 0);
 
         assert_eq!(action.action_type, "order");
         assert_eq!(action.grouping, "na");
@@ -185,7 +185,7 @@ mod tests {
                 reduce_only: false,
             };
 
-            let action = OrderAction::from_req(&order_req, 0);
+            let action = OrderAction::from_req(&order_req, 0, 0);
             assert_eq!(action.orders[0].t.limit.tif, expected);
         }
     }
@@ -201,7 +201,7 @@ mod tests {
             reduce_only: false,
         };
 
-        let action = OrderAction::from_req(&order_req, 12345);
+        let action = OrderAction::from_req(&order_req, 12345, 0);
         let user_signed_action = UserSignedAction { action };
 
         // Should serialize to MessagePack without error
@@ -225,7 +225,7 @@ mod tests {
             reduce_only: false,
         };
 
-        let result = signer.sign_order(&order_req, 12345).await;
+        let result = signer.sign_order(&order_req, 12345, 0).await;
         assert!(result.is_ok());
 
         let signature = result.unwrap();

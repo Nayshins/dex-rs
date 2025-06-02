@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 use tokio::sync::mpsc;
 
 use dex_rs_core::{
@@ -11,6 +11,28 @@ use dex_rs_types::*;
 
 use crate::{http::HlRest, signer::HlSigner, ws::HlWs};
 
+static CUR_NONCE: AtomicU64 = AtomicU64::new(0);
+
+fn now_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+pub(crate) fn next_nonce() -> u64 {
+    let nonce = CUR_NONCE.fetch_add(1, Ordering::Relaxed);
+    let now_ms = now_timestamp_ms();
+    if nonce > now_ms + 1000 {
+        eprintln!("nonce progressed too far ahead {} {}", nonce, now_ms);
+    }
+    // more than 300 seconds behind
+    if nonce + 300000 < now_ms {
+        CUR_NONCE.fetch_max(now_ms, Ordering::Relaxed);
+    }
+    nonce
+}
+
 pub struct Hyperliquid {
     rest: HlRest,
     ws: HlWs<FastWsTransport>,
@@ -20,6 +42,20 @@ pub struct Hyperliquid {
 impl Hyperliquid {
     pub fn builder() -> HyperliquidBuilder {
         HyperliquidBuilder::default()
+    }
+
+    /// Get asset index for a given coin symbol by fetching from API
+    async fn get_asset_index(&self, coin: &str) -> Result<u32, DexError> {
+        let meta = self.rest.meta(None).await?;
+        
+        // Look for the coin in the universe
+        for item in &meta.universe {
+            if item.name.eq_ignore_ascii_case(coin) {
+                return Ok(item.index);
+            }
+        }
+        
+        Err(DexError::Other(format!("Asset not found: {}", coin)))
     }
 }
 
@@ -80,20 +116,25 @@ impl PerpDex for Hyperliquid {
         ob.asks.truncate(depth);
         Ok(ob)
     }
-    
+
     async fn all_mids(&self) -> Result<AllMids, DexError> {
         self.rest.all_mids(None).await
     }
-    
+
     async fn meta(&self) -> Result<UniverseMeta, DexError> {
         self.rest.meta(None).await
     }
-    
+
     async fn meta_and_asset_ctxs(&self) -> Result<MetaAndAssetCtxs, DexError> {
         self.rest.meta_and_asset_ctxs().await
     }
-    
-    async fn funding_history(&self, coin: &str, start_time: u64, end_time: Option<u64>) -> Result<Vec<FundingHistory>, DexError> {
+
+    async fn funding_history(
+        &self,
+        coin: &str,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<Vec<FundingHistory>, DexError> {
         self.rest.funding_history(coin, start_time, end_time).await
     }
 
@@ -103,54 +144,85 @@ impl PerpDex for Hyperliquid {
             .signer
             .as_ref()
             .ok_or(DexError::Unsupported("signer required"))?;
-        let nonce = 0; // TODO: real nonce fetch
-        let sig = signer.sign_order(&req, nonce).await?;
+        let nonce = next_nonce();
+        let asset_index = self.get_asset_index(&req.coin).await?;
+        let sig = signer.sign_order(&req, nonce, asset_index).await?;
         let payload = serde_json::json!({ "type": "order", "orders": [req], "grouping": "na", "signature": sig });
         let resp = self.rest.place_order(payload).await?;
-        Ok(OrderId(
-            resp["data"]["statuses"][0]["resting"]["oid"]
-                .as_u64()
-                .unwrap()
-                .to_string(),
-        ))
+        let oid = resp["data"]["statuses"][0]["resting"]["oid"]
+            .as_u64()
+            .ok_or_else(|| DexError::Parse("Failed to parse order ID from response".into()))?;
+        Ok(OrderId(oid.to_string()))
     }
 
     async fn cancel(&self, id: OrderId) -> Result<(), DexError> {
-        let payload = serde_json::json!({ "type":"cancel", "cancels": [{"oid": id.0.parse::<u64>().unwrap()}] });
+        let oid = id.0.parse::<u64>()
+            .map_err(|e| DexError::Parse(format!("Invalid order ID format: {}", e)))?;
+        let payload = serde_json::json!({ "type":"cancel", "cancels": [{"oid": oid}] });
         self.rest.place_order(payload).await?;
         Ok(())
     }
 
     async fn positions(&self) -> Result<Vec<Position>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
-        let user_state = self.rest.clearinghouse_state(&signer.address_hex(), None).await?;
-        
-        Ok(user_state.asset_positions.into_iter().map(|pos| Position {
-            coin: pos.coin,
-            size: pos.szi.parse().unwrap_or(0.0),
-            entry_px: pos.entry_px.map(|p| *p),
-            unrealized_pnl: pos.unrealized_pnl.parse().unwrap_or(0.0),
-        }).collect())
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
+        let user_state = self
+            .rest
+            .clearinghouse_state(&signer.address_hex(), None)
+            .await?;
+
+        Ok(user_state
+            .asset_positions
+            .into_iter()
+            .map(|pos| Position {
+                coin: pos.coin,
+                size: pos.szi.parse().unwrap_or(0.0),
+                entry_px: pos.entry_px.map(|p| *p),
+                unrealized_pnl: pos.unrealized_pnl.parse().unwrap_or(0.0),
+            })
+            .collect())
     }
-    
+
     async fn user_state(&self) -> Result<UserState, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
-        self.rest.clearinghouse_state(&signer.address_hex(), None).await
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
+        self.rest
+            .clearinghouse_state(&signer.address_hex(), None)
+            .await
     }
-    
+
     async fn open_orders(&self) -> Result<Vec<OpenOrder>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.open_orders(&signer.address_hex(), None).await
     }
-    
+
     async fn user_fills(&self) -> Result<Vec<UserFill>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.user_fills(&signer.address_hex()).await
     }
-    
-    async fn user_fills_by_time(&self, start_time: u64, end_time: Option<u64>) -> Result<Vec<UserFill>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
-        self.rest.user_fills_by_time(&signer.address_hex(), start_time, end_time).await
+
+    async fn user_fills_by_time(
+        &self,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<Vec<UserFill>, DexError> {
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
+        self.rest
+            .user_fills_by_time(&signer.address_hex(), start_time, end_time)
+            .await
     }
 
     /* ---- streaming ---- */
@@ -169,67 +241,105 @@ impl PerpDex for Hyperliquid {
 
 impl Hyperliquid {
     /* ----- Additional convenience methods for full API access ----- */
-    
+
     /// Get candlestick data
-    pub async fn candle_snapshot(&self, coin: &str, interval: &str, start_time: u64, end_time: u64) -> Result<CandleSnapshot, DexError> {
-        self.rest.candle_snapshot(coin, interval, start_time, end_time).await
+    pub async fn candle_snapshot(
+        &self,
+        coin: &str,
+        interval: &str,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<CandleSnapshot, DexError> {
+        self.rest
+            .candle_snapshot(coin, interval, start_time, end_time)
+            .await
     }
-    
+
     /// Get user's fee summary (requires authentication)
     pub async fn user_fees(&self) -> Result<UserFees, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.user_fees(&signer.address_hex()).await
     }
-    
+
     /// Get user's funding payment history (requires authentication)
-    pub async fn user_funding(&self, start_time: u64, end_time: Option<u64>) -> Result<UserFunding, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
-        self.rest.user_funding(&signer.address_hex(), start_time, end_time).await
+    pub async fn user_funding(
+        &self,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<UserFunding, DexError> {
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
+        self.rest
+            .user_funding(&signer.address_hex(), start_time, end_time)
+            .await
     }
-    
+
     /// Query specific order status (requires authentication)
     pub async fn order_status(&self, oid: u64) -> Result<OrderStatus, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.order_status(&signer.address_hex(), oid).await
     }
-    
+
     /// Get spot market metadata
     pub async fn spot_meta(&self) -> Result<SpotMeta, DexError> {
         self.rest.spot_meta().await
     }
-    
+
     /// Get spot market metadata with asset contexts
     pub async fn spot_meta_and_asset_ctxs(&self) -> Result<SpotMetaAndAssetCtxs, DexError> {
         self.rest.spot_meta_and_asset_ctxs().await
     }
-    
+
     /// Get user's staking summary (requires authentication)
     pub async fn delegator_summary(&self) -> Result<DelegatorSummary, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.delegator_summary(&signer.address_hex()).await
     }
-    
+
     /// Get user's delegation details (requires authentication)
     pub async fn delegations(&self) -> Result<Vec<Delegation>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.delegations(&signer.address_hex()).await
     }
-    
+
     /// Get user's staking rewards (requires authentication)
     pub async fn delegator_rewards(&self) -> Result<DelegatorRewards, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.delegator_rewards(&signer.address_hex()).await
     }
-    
+
     /// Get user's referral state (requires authentication)
     pub async fn referral(&self) -> Result<ReferralState, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.referral(&signer.address_hex()).await
     }
-    
+
     /// Get user's sub-accounts (requires authentication)
     pub async fn sub_accounts(&self) -> Result<Vec<SubAccount>, DexError> {
-        let signer = self.signer.as_ref().ok_or(DexError::Unsupported("signer required"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or(DexError::Unsupported("signer required"))?;
         self.rest.sub_accounts(&signer.address_hex()).await
     }
 }

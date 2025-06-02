@@ -2,12 +2,12 @@ use bytes::Bytes;
 use dex_rs_core::traits::{FillEvent, OrderEvent, StreamEvent, StreamKind};
 use dex_rs_core::{ws::WsTransport, DexError};
 use dex_rs_types::{price, qty, OrderBook, OrderBookLevel, Side, Trade};
-use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
 
-pub struct HlWs<T: WsTransport> {
+pub struct HlWs<T: WsTransport + Clone + 'static> {
     txp: T,
     url: String,
 }
@@ -85,7 +85,7 @@ struct UserFill {
     fee: String,
 }
 
-impl<T: WsTransport> HlWs<T> {
+impl<T: WsTransport + Clone + 'static> HlWs<T> {
     pub fn new(txp: T, testnet: bool) -> Self {
         let url = if testnet {
             "wss://api.hyperliquid-testnet.xyz/ws"
@@ -105,8 +105,6 @@ impl<T: WsTransport> HlWs<T> {
         out: mpsc::UnboundedSender<StreamEvent>,
         address_hex: Option<&str>,
     ) -> Result<(), DexError> {
-        let mut ws = self.txp.connect(&self.url).await?;
-
         let subscription = match kind {
             StreamKind::Bbo => json!({
                 "type": "bbo",
@@ -135,28 +133,75 @@ impl<T: WsTransport> HlWs<T> {
             "subscription": subscription
         });
 
-        ws.send(Bytes::from(msg.to_string()))
-            .await
-            .map_err(DexError::from)?;
-
+        // Clone necessary data for the reconnection loop
+        let txp = self.txp.clone();
+        let url = self.url.clone();
         let stream_kind = kind;
+        let msg_bytes = Bytes::from(msg.to_string());
+
         tokio::spawn(async move {
-            while let Some(frame) = ws.next().await {
-                match frame {
-                    Ok(bytes) => {
-                        if let Err(e) = Self::handle_message(&bytes, &out, stream_kind).await {
-                            eprintln!("Error handling WebSocket message: {}", e);
-                        }
+            let mut retry_count = 0;
+            const MAX_RETRIES: u32 = 10;
+            const BASE_DELAY_MS: u64 = 1000;
+            const MAX_DELAY_MS: u64 = 30000;
+
+            loop {
+                match Self::connect_and_subscribe(&txp, &url, &msg_bytes, &out, stream_kind).await {
+                    Ok(_) => {
+                        // Connection ended normally, reset retry count
+                        retry_count = 0;
+                        eprintln!("WebSocket connection ended, attempting to reconnect...");
                     }
                     Err(e) => {
-                        eprintln!("WebSocket frame error: {:?}", e);
-                        break;
+                        retry_count += 1;
+                        eprintln!("WebSocket error (attempt {}): {:?}", retry_count, e);
+                        
+                        if retry_count >= MAX_RETRIES {
+                            eprintln!("Max retries reached, giving up on WebSocket connection");
+                            break;
+                        }
                     }
                 }
+
+                // Exponential backoff with simple jitter
+                let delay_ms = std::cmp::min(
+                    BASE_DELAY_MS * 2_u64.pow(retry_count.saturating_sub(1)),
+                    MAX_DELAY_MS
+                );
+                // Simple jitter using retry_count for deterministic but varied delays
+                let jitter = (retry_count as u64 * 137) % (delay_ms / 4 + 1); // Add up to 25% jitter
+                let total_delay = delay_ms + jitter;
+                
+                eprintln!("Waiting {}ms before reconnecting...", total_delay);
+                sleep(Duration::from_millis(total_delay)).await;
             }
         });
 
         Ok(())
+    }
+
+    async fn connect_and_subscribe<U: WsTransport + 'static>(
+        txp: &U,
+        url: &str,
+        msg_bytes: &Bytes,
+        out: &mpsc::UnboundedSender<StreamEvent>,
+        stream_kind: StreamKind,
+    ) -> Result<(), DexError> {
+        let mut ws = txp.connect(url).await?;
+        ws.send_message(msg_bytes.clone()).await?;
+
+        loop {
+            match ws.read_message().await {
+                Ok(bytes) => {
+                    if let Err(e) = Self::handle_message(&bytes, out, stream_kind).await {
+                        eprintln!("Error handling WebSocket message: {}", e);
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
     }
 
     async fn handle_message(
@@ -233,21 +278,31 @@ impl<T: WsTransport> HlWs<T> {
 
     fn parse_l2_book(val: &Value) -> Result<Option<StreamEvent>, DexError> {
         if let Ok(book) = serde_json::from_value::<L2BookData>(val["data"].clone()) {
-            let bids = book.levels[0]
+            let bids: Result<Vec<_>, DexError> = book.levels[0]
                 .iter()
-                .map(|level| OrderBookLevel {
-                    price: price(level.px.parse().unwrap()),
-                    qty: qty(level.sz.parse().unwrap()),
+                .map(|level| -> Result<OrderBookLevel, DexError> {
+                    Ok(OrderBookLevel {
+                        price: price(level.px.parse()
+                            .map_err(|_| DexError::Parse("Invalid L2 bid price".into()))?),
+                        qty: qty(level.sz.parse()
+                            .map_err(|_| DexError::Parse("Invalid L2 bid quantity".into()))?),
+                    })
                 })
                 .collect();
+            let bids = bids?;
 
-            let asks = book.levels[1]
+            let asks: Result<Vec<_>, DexError> = book.levels[1]
                 .iter()
-                .map(|level| OrderBookLevel {
-                    price: price(level.px.parse().unwrap()),
-                    qty: qty(level.sz.parse().unwrap()),
+                .map(|level| -> Result<OrderBookLevel, DexError> {
+                    Ok(OrderBookLevel {
+                        price: price(level.px.parse()
+                            .map_err(|_| DexError::Parse("Invalid L2 ask price".into()))?),
+                        qty: qty(level.sz.parse()
+                            .map_err(|_| DexError::Parse("Invalid L2 ask quantity".into()))?),
+                    })
                 })
                 .collect();
+            let asks = asks?;
 
             let orderbook = OrderBook {
                 coin: book.coin,
@@ -527,6 +582,7 @@ mod tests {
     }
 
     // Dummy transport for testing parsing functions
+    #[derive(Clone)]
     struct DummyTransport;
 
     #[async_trait]
@@ -534,7 +590,7 @@ mod tests {
         async fn connect(
             &self,
             _url: &str,
-        ) -> Result<Box<dyn dex_rs_core::ws::WsStream + Send + Sync + Unpin>, DexError> {
+        ) -> Result<Box<dyn dex_rs_core::ws::WsConnection + Send + Sync + Unpin>, DexError> {
             Err(DexError::Unsupported("DummyTransport"))
         }
     }

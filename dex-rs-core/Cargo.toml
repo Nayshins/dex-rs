@@ -15,10 +15,16 @@ dex-rs-types = { path = "../dex-rs-types" }
 tokio        = { workspace = true, optional = true, features = ["macros","rt","time"] }
 reqwest      = { workspace = true, optional = true }
 fastwebsockets = { workspace = true, optional = true }
+hyper        = { workspace = true, optional = true }
+hyper-util   = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+rustls       = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
 futures-core = "0.3"    # Stream/Sink traits
 futures-util = { version = "0.3", features = ["sink"] }   # StreamExt, SinkExt
 
 [features]
 default       = ["http-reqwest", "rt-tokio"]
 http-reqwest  = ["reqwest"]
-rt-tokio      = ["tokio", "fastwebsockets"]
+rt-tokio      = ["tokio", "fastwebsockets", "hyper", "hyper-util", "http-body-util", "rustls", "tokio-rustls", "webpki-roots"]

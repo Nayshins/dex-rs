@@ -93,7 +93,10 @@ async fn test_new_market_data_endpoints() {
     // Test all mids
     let all_mids = hl.all_mids().await.unwrap();
     assert!(!all_mids.mids.is_empty());
-    println!("All mids: {:?}", all_mids.mids.keys().take(5).collect::<Vec<_>>());
+    println!(
+        "All mids: {:?}",
+        all_mids.mids.keys().take(5).collect::<Vec<_>>()
+    );
 
     // Test meta
     let meta = hl.meta().await.unwrap();
@@ -112,12 +115,18 @@ async fn test_new_market_data_endpoints() {
         .unwrap()
         .as_millis() as u64;
     let start_time = end_time - (24 * 60 * 60 * 1000); // 24 hours ago
-    
-    let funding_history = hl.funding_history("BTC", start_time, Some(end_time)).await.unwrap();
+
+    let funding_history = hl
+        .funding_history("BTC", start_time, Some(end_time))
+        .await
+        .unwrap();
     println!("Funding history entries: {}", funding_history.len());
 
     // Test candle snapshot
-    let candles = hl.candle_snapshot("BTC", "1h", start_time, end_time).await.unwrap();
+    let candles = hl
+        .candle_snapshot("BTC", "1h", start_time, end_time)
+        .await
+        .unwrap();
     assert!(!candles.0.is_empty());
     println!("Candles count: {}", candles.0.len());
 }
@@ -128,11 +137,16 @@ async fn test_authenticated_endpoints() {
     let hl = Hyperliquid::builder()
         .wallet_env("HL_PK")
         .testnet()
-        .connect().await.unwrap();
+        .connect()
+        .await
+        .unwrap();
 
     // Test user state
     let user_state = hl.user_state().await.unwrap();
-    println!("Account value: {}", user_state.cross_margin_summary.account_value);
+    println!(
+        "Account value: {}",
+        user_state.cross_margin_summary.account_value
+    );
     println!("Positions count: {}", user_state.asset_positions.len());
 
     // Test open orders
@@ -149,8 +163,11 @@ async fn test_authenticated_endpoints() {
         .unwrap()
         .as_millis() as u64;
     let start_time = end_time - (24 * 60 * 60 * 1000);
-    
-    let recent_fills = hl.user_fills_by_time(start_time, Some(end_time)).await.unwrap();
+
+    let recent_fills = hl
+        .user_fills_by_time(start_time, Some(end_time))
+        .await
+        .unwrap();
     println!("Recent fills: {}", recent_fills.len());
 
     // Test user fees
@@ -159,7 +176,10 @@ async fn test_authenticated_endpoints() {
 
     // Test user funding (last 7 days)
     let start_time_week = end_time - (7 * 24 * 60 * 60 * 1000);
-    let user_funding = hl.user_funding(start_time_week, Some(end_time)).await.unwrap();
+    let user_funding = hl
+        .user_funding(start_time_week, Some(end_time))
+        .await
+        .unwrap();
     println!("Funding payments: {}", user_funding.delta.len());
 }
 
@@ -176,5 +196,8 @@ async fn test_spot_endpoints() {
     // Test spot meta and asset contexts
     let spot_meta_and_ctxs = hl.spot_meta_and_asset_ctxs().await.unwrap();
     assert!(!spot_meta_and_ctxs.meta.tokens.is_empty());
-    println!("Spot asset contexts count: {}", spot_meta_and_ctxs.asset_ctxs.len());
+    println!(
+        "Spot asset contexts count: {}",
+        spot_meta_and_ctxs.asset_ctxs.len()
+    );
 }

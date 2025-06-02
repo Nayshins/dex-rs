@@ -41,17 +41,22 @@ impl HlRest {
         };
         let raws: Vec<RawTrade> = self.http.post_json(&url, &body).await?;
 
-        Ok(raws
+        let trades: Result<Vec<_>, DexError> = raws
             .into_iter()
             .take(limit)
-            .map(|r| Trade {
-                id: r.hash,
-                ts: r.time,
-                side: if r.side == "B" { Side::Buy } else { Side::Sell },
-                price: price(r.px.parse::<f64>().unwrap()),
-                qty: qty(r.qty.parse::<f64>().unwrap()),
+            .map(|r| -> Result<Trade, DexError> {
+                Ok(Trade {
+                    id: r.hash,
+                    ts: r.time,
+                    side: if r.side == "B" { Side::Buy } else { Side::Sell },
+                    price: price(r.px.parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid trade price".into()))?),
+                    qty: qty(r.qty.parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid trade quantity".into()))?),
+                })
             })
-            .collect())
+            .collect();
+        Ok(trades?)
     }
 
     /* ----- order-book snapshot ----- */
@@ -81,21 +86,31 @@ impl HlRest {
                 .clone(),
         )?;
 
-        let bids = raw.levels[0]
+        let bids: Result<Vec<_>, DexError> = raw.levels[0]
             .iter()
-            .map(|l| OrderBookLevel {
-                price: price(l[0].parse::<f64>().unwrap()),
-                qty: qty(l[1].parse::<f64>().unwrap()),
+            .map(|l| -> Result<OrderBookLevel, DexError> {
+                Ok(OrderBookLevel {
+                    price: price(l[0].parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid bid price".into()))?),
+                    qty: qty(l[1].parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid bid quantity".into()))?),
+                })
             })
             .collect();
+        let bids = bids?;
 
-        let asks = raw.levels[1]
+        let asks: Result<Vec<_>, DexError> = raw.levels[1]
             .iter()
-            .map(|l| OrderBookLevel {
-                price: price(l[0].parse::<f64>().unwrap()),
-                qty: qty(l[1].parse::<f64>().unwrap()),
+            .map(|l| -> Result<OrderBookLevel, DexError> {
+                Ok(OrderBookLevel {
+                    price: price(l[0].parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid ask price".into()))?),
+                    qty: qty(l[1].parse::<f64>()
+                        .map_err(|_| DexError::Parse("Invalid ask quantity".into()))?),
+                })
             })
             .collect();
+        let asks = asks?;
 
         Ok(OrderBook {
             coin: coin.into(),
@@ -119,7 +134,11 @@ impl HlRest {
     /* ----- User Account & Trading Data Endpoints ----- */
 
     /// Get user's perpetual trading state
-    pub async fn clearinghouse_state(&self, user: &str, dex: Option<&str>) -> Result<UserState, DexError> {
+    pub async fn clearinghouse_state(
+        &self,
+        user: &str,
+        dex: Option<&str>,
+    ) -> Result<UserState, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -130,12 +149,19 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "clearinghouseState", user, dex };
+        let body = Body {
+            kind: "clearinghouseState",
+            user,
+            dex,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get user's spot trading state
-    pub async fn spot_clearinghouse_state(&self, user: &str) -> Result<serde_json::Value, DexError> {
+    pub async fn spot_clearinghouse_state(
+        &self,
+        user: &str,
+    ) -> Result<serde_json::Value, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -144,12 +170,19 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "spotClearinghouseState", user };
+        let body = Body {
+            kind: "spotClearinghouseState",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get user's open orders
-    pub async fn open_orders(&self, user: &str, dex: Option<&str>) -> Result<Vec<OpenOrder>, DexError> {
+    pub async fn open_orders(
+        &self,
+        user: &str,
+        dex: Option<&str>,
+    ) -> Result<Vec<OpenOrder>, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -160,12 +193,20 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "openOrders", user, dex };
+        let body = Body {
+            kind: "openOrders",
+            user,
+            dex,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get user's frontend open orders
-    pub async fn frontend_open_orders(&self, user: &str, dex: Option<&str>) -> Result<Vec<OpenOrder>, DexError> {
+    pub async fn frontend_open_orders(
+        &self,
+        user: &str,
+        dex: Option<&str>,
+    ) -> Result<Vec<OpenOrder>, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -176,7 +217,11 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "frontendOpenOrders", user, dex };
+        let body = Body {
+            kind: "frontendOpenOrders",
+            user,
+            dex,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -190,12 +235,20 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "userFills", user };
+        let body = Body {
+            kind: "userFills",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get user's fills within time range
-    pub async fn user_fills_by_time(&self, user: &str, start_time: u64, end_time: Option<u64>) -> Result<Vec<UserFill>, DexError> {
+    pub async fn user_fills_by_time(
+        &self,
+        user: &str,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<Vec<UserFill>, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -208,12 +261,22 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "userFillsByTime", user, start_time, end_time };
+        let body = Body {
+            kind: "userFillsByTime",
+            user,
+            start_time,
+            end_time,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get user's funding payment history
-    pub async fn user_funding(&self, user: &str, start_time: u64, end_time: Option<u64>) -> Result<UserFunding, DexError> {
+    pub async fn user_funding(
+        &self,
+        user: &str,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<UserFunding, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -226,7 +289,12 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "userFunding", user, start_time, end_time };
+        let body = Body {
+            kind: "userFunding",
+            user,
+            start_time,
+            end_time,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -240,7 +308,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "userFees", user };
+        let body = Body {
+            kind: "userFees",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -255,7 +326,11 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "orderStatus", user, oid };
+        let body = Body {
+            kind: "orderStatus",
+            user,
+            oid,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -272,7 +347,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "allMids", dex };
+        let body = Body {
+            kind: "allMids",
+            dex,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -300,7 +378,9 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "metaAndAssetCtxs" };
+        let body = Body {
+            kind: "metaAndAssetCtxs",
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -326,7 +406,9 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "spotMetaAndAssetCtxs" };
+        let body = Body {
+            kind: "spotMetaAndAssetCtxs",
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -344,7 +426,12 @@ impl HlRest {
     }
 
     /// Get funding rate history
-    pub async fn funding_history(&self, coin: &str, start_time: u64, end_time: Option<u64>) -> Result<Vec<FundingHistory>, DexError> {
+    pub async fn funding_history(
+        &self,
+        coin: &str,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<Vec<FundingHistory>, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -357,12 +444,23 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "fundingHistory", coin, start_time, end_time };
+        let body = Body {
+            kind: "fundingHistory",
+            coin,
+            start_time,
+            end_time,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get candlestick data
-    pub async fn candle_snapshot(&self, coin: &str, interval: &str, start_time: u64, end_time: u64) -> Result<CandleSnapshot, DexError> {
+    pub async fn candle_snapshot(
+        &self,
+        coin: &str,
+        interval: &str,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<CandleSnapshot, DexError> {
         #[derive(Serialize)]
         struct CandleReq<'a> {
             coin: &'a str,
@@ -381,8 +479,16 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let req = CandleReq { coin, interval, start_time, end_time };
-        let body = Body { kind: "candleSnapshot", req };
+        let req = CandleReq {
+            coin,
+            interval,
+            start_time,
+            end_time,
+        };
+        let body = Body {
+            kind: "candleSnapshot",
+            req,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -398,7 +504,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "delegatorSummary", user };
+        let body = Body {
+            kind: "delegatorSummary",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -412,7 +521,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "delegations", user };
+        let body = Body {
+            kind: "delegations",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -426,7 +538,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "delegatorRewards", user };
+        let body = Body {
+            kind: "delegatorRewards",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -442,7 +557,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "referral", user };
+        let body = Body {
+            kind: "referral",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
@@ -456,12 +574,18 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "subAccounts", user };
+        let body = Body {
+            kind: "subAccounts",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 
     /// Get multi-sig signers for user
-    pub async fn user_to_multi_sig_signers(&self, user: &str) -> Result<serde_json::Value, DexError> {
+    pub async fn user_to_multi_sig_signers(
+        &self,
+        user: &str,
+    ) -> Result<serde_json::Value, DexError> {
         #[derive(Serialize)]
         struct Body<'a> {
             #[serde(rename = "type")]
@@ -470,7 +594,10 @@ impl HlRest {
         }
 
         let url = format!("{}/info", self.base);
-        let body = Body { kind: "userToMultiSigSigners", user };
+        let body = Body {
+            kind: "userToMultiSigSigners",
+            user,
+        };
         self.http.post_json(&url, &body).await
     }
 }
@@ -635,7 +762,10 @@ mod tests {
             "user": "0x1234567890abcdef1234567890abcdef12345678"
         });
         assert_eq!(clearinghouse_body["type"], "clearinghouseState");
-        assert_eq!(clearinghouse_body["user"], "0x1234567890abcdef1234567890abcdef12345678");
+        assert_eq!(
+            clearinghouse_body["user"],
+            "0x1234567890abcdef1234567890abcdef12345678"
+        );
 
         // Test openOrders request body
         let open_orders_body = json!({
@@ -736,7 +866,7 @@ mod tests {
         assert!(mock_user_state.get("assetPositions").is_some());
         assert!(mock_user_state.get("crossMarginSummary").is_some());
         assert!(mock_user_state.get("time").is_some());
-        
+
         let asset_positions = mock_user_state["assetPositions"].as_array().unwrap();
         assert!(!asset_positions.is_empty());
     }
@@ -752,7 +882,7 @@ mod tests {
                 "time": 1234567890000u64
             },
             {
-                "coin": "BTC", 
+                "coin": "BTC",
                 "fundingRate": "0.00015",
                 "premium": "0.0001",
                 "time": 1234567900000u64
@@ -761,7 +891,7 @@ mod tests {
 
         let funding_array = mock_funding_history.as_array().unwrap();
         assert_eq!(funding_array.len(), 2);
-        
+
         for funding in funding_array {
             assert!(funding.get("coin").is_some());
             assert!(funding.get("fundingRate").is_some());
@@ -786,7 +916,7 @@ mod tests {
         assert!(mock_meta.get("universe").is_some());
         let universe = mock_meta["universe"].as_array().unwrap();
         assert!(!universe.is_empty());
-        
+
         let asset = &universe[0];
         assert!(asset.get("name").is_some());
         assert!(asset.get("maxLeverage").is_some());
