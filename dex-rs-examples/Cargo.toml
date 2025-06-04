@@ -5,8 +5,72 @@ edition = "2021"
 
 [dependencies]
 dex-rs = { path = "..", features = ["hyperliquid"] }
-tokio  = { workspace = true }
+tokio = { workspace = true }
+env_logger = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
 
+# Simple example
 [[bin]]
 name = "simple"
 path = "src/simple.rs"
+
+# Market data examples
+[[bin]]
+name = "trades"
+path = "src/trades.rs"
+
+[[bin]]
+name = "orderbook"
+path = "src/orderbook.rs"
+
+[[bin]]
+name = "funding_history"
+path = "src/funding_history.rs"
+
+[[bin]]
+name = "market_info"
+path = "src/market_info.rs"
+
+# WebSocket examples
+[[bin]]
+name = "ws_trades"
+path = "src/ws_trades.rs"
+
+[[bin]]
+name = "ws_orderbook"
+path = "src/ws_orderbook.rs"
+
+[[bin]]
+name = "ws_bbo"
+path = "src/ws_bbo.rs"
+
+[[bin]]
+name = "ws_user_events"
+path = "src/ws_user_events.rs"
+
+# Trading examples
+[[bin]]
+name = "place_order"
+path = "src/place_order.rs"
+
+[[bin]]
+name = "cancel_order"
+path = "src/cancel_order.rs"
+
+# Account examples
+[[bin]]
+name = "user_state"
+path = "src/user_state.rs"
+
+[[bin]]
+name = "positions"
+path = "src/positions.rs"
+
+[[bin]]
+name = "fills"
+path = "src/fills.rs"
+
+# Multi-stream test
+[[bin]]
+name = "ws_all_streams"
+path = "src/ws_all_streams.rs"
