@@ -3,7 +3,9 @@ use dex_rs_core::traits::{FillEvent, OrderEvent, StreamEvent, StreamKind};
 use dex_rs_core::{ws::WsTransport, DexError};
 use dex_rs_types::{price, qty, OrderBook, OrderBookLevel, Side, Trade};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
+use simd_json::prelude::*;
+use simd_json::BorrowedValue;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -13,76 +15,76 @@ pub struct HlWs<T: WsTransport + Clone + 'static> {
 }
 
 #[derive(Deserialize, Debug)]
-struct TradeData {
-    coin: String,
-    side: String,
-    px: String,
-    sz: String,
+struct TradeDataBorrowed<'a> {
+    coin: &'a str,
+    side: &'a str,
+    px: &'a str,
+    sz: &'a str,
     time: u64,
-    hash: String,
+    hash: &'a str,
     tid: u64,
 }
 
 #[derive(Deserialize, Debug)]
-struct L2BookData {
-    coin: String,
+struct L2BookDataBorrowed<'a> {
+    coin: &'a str,
     time: u64,
-    levels: [Vec<L2Level>; 2], // [bids, asks]
+    levels: [Vec<L2LevelBorrowed<'a>>; 2], // [bids, asks]
 }
 
 #[derive(Deserialize, Debug)]
-struct L2Level {
-    px: String,
-    sz: String,
+struct L2LevelBorrowed<'a> {
+    px: &'a str,
+    sz: &'a str,
     n: u32,
 }
 
 #[derive(Deserialize, Debug)]
-struct BboData {
-    coin: String,
+struct BboDataBorrowed<'a> {
+    coin: &'a str,
     time: u64,
     #[serde(rename = "bestBid")]
-    best_bid: String,
+    best_bid: &'a str,
     #[serde(rename = "bestAsk")]
-    best_ask: String,
+    best_ask: &'a str,
 }
 
 #[derive(Deserialize, Debug)]
-struct OrderUpdate {
-    order: BasicOrder,
-    status: String,
+struct OrderUpdateBorrowed<'a> {
+    order: BasicOrderBorrowed<'a>,
+    status: &'a str,
     #[serde(rename = "statusTimestamp")]
     status_timestamp: u64,
 }
 
 #[derive(Deserialize, Debug)]
-struct BasicOrder {
-    coin: String,
-    side: String,
+struct BasicOrderBorrowed<'a> {
+    coin: &'a str,
+    side: &'a str,
     #[serde(rename = "limitPx")]
-    limit_px: String,
-    sz: String,
+    limit_px: &'a str,
+    sz: &'a str,
     oid: u64,
     timestamp: u64,
 }
 
 #[derive(Deserialize, Debug)]
-struct UserFillsData {
-    user: String,
-    fills: Vec<UserFill>,
+struct UserFillsDataBorrowed<'a> {
+    user: &'a str,
+    fills: Vec<UserFillBorrowed<'a>>,
 }
 
 #[derive(Deserialize, Debug)]
-struct UserFill {
-    coin: String,
-    px: String,
-    sz: String,
-    side: String,
+struct UserFillBorrowed<'a> {
+    coin: &'a str,
+    px: &'a str,
+    sz: &'a str,
+    side: &'a str,
     time: u64,
-    hash: String,
+    hash: &'a str,
     oid: u64,
     tid: u64,
-    fee: String,
+    fee: &'a str,
 }
 
 impl<T: WsTransport + Clone + 'static> HlWs<T> {
@@ -209,18 +211,20 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
         out: &mpsc::UnboundedSender<StreamEvent>,
         kind: StreamKind,
     ) -> Result<(), DexError> {
-        let val: Value = serde_json::from_slice(bytes)?;
+        let mut bytes_mut = bytes.to_vec();
+        let val: BorrowedValue = simd_json::to_borrowed_value(&mut bytes_mut)
+            .map_err(|e| DexError::Parse(format!("SIMD JSON parse error: {}", e)))?;
 
-        if val.get("method") == Some(&json!("subscriptionResponse")) {
+        if val.get("method").map(|v| v.as_str()) == Some(Some("subscriptionResponse")) {
             return Ok(());
         }
 
         let event = match kind {
-            StreamKind::Bbo => Self::parse_bbo(&val)?,
-            StreamKind::Trades => Self::parse_trades(&val)?,
-            StreamKind::L2Book => Self::parse_l2_book(&val)?,
-            StreamKind::Orders => Self::parse_orders(&val)?,
-            StreamKind::Fills => Self::parse_fills(&val)?,
+            StreamKind::Bbo => Self::parse_bbo_simd(&val)?,
+            StreamKind::Trades => Self::parse_trades_simd(&val)?,
+            StreamKind::L2Book => Self::parse_l2_book_simd(&val)?,
+            StreamKind::Orders => Self::parse_orders_simd(&val)?,
+            StreamKind::Fills => Self::parse_fills_simd(&val)?,
         };
 
         if let Some(ev) = event {
@@ -230,145 +234,166 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
         Ok(())
     }
 
-    fn parse_bbo(val: &Value) -> Result<Option<StreamEvent>, DexError> {
-        if let Ok(bbo) = serde_json::from_value::<BboData>(val["data"].clone()) {
-            Ok(Some(StreamEvent::Bbo {
-                coin: bbo.coin,
-                bid_px: bbo
-                    .best_bid
-                    .parse()
-                    .map_err(|_| DexError::Parse("Invalid bid price".into()))?,
-                ask_px: bbo
-                    .best_ask
-                    .parse()
-                    .map_err(|_| DexError::Parse("Invalid ask price".into()))?,
-                timestamp: bbo.time,
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn parse_trades(val: &Value) -> Result<Option<StreamEvent>, DexError> {
-        if let Ok(trades) = serde_json::from_value::<Vec<TradeData>>(val["data"].clone()) {
-            if let Some(trade_data) = trades.into_iter().next() {
-                let trade = Trade {
-                    id: trade_data.hash.clone(),
-                    ts: trade_data.time,
-                    side: if trade_data.side == "B" {
-                        Side::Buy
-                    } else {
-                        Side::Sell
-                    },
-                    price: price(
-                        trade_data
-                            .px
-                            .parse()
-                            .map_err(|_| DexError::Parse("Invalid trade price".into()))?,
-                    ),
-                    qty: qty(trade_data
-                        .sz
+    fn parse_bbo_simd(val: &BorrowedValue) -> Result<Option<StreamEvent>, DexError> {
+        if let Some(data) = val.get("data") {
+            if let Ok(bbo) = simd_json::serde::from_borrowed_value::<BboDataBorrowed>(data.clone())
+            {
+                Ok(Some(StreamEvent::Bbo {
+                    coin: bbo.coin.to_string(),
+                    bid_px: bbo
+                        .best_bid
                         .parse()
-                        .map_err(|_| DexError::Parse("Invalid trade size".into()))?),
-                    coin: trade_data.coin,
-                    tid: trade_data.tid,
-                };
-                return Ok(Some(StreamEvent::Trade(trade)));
+                        .map_err(|_| DexError::Parse("Invalid bid price".into()))?,
+                    ask_px: bbo
+                        .best_ask
+                        .parse()
+                        .map_err(|_| DexError::Parse("Invalid ask price".into()))?,
+                    timestamp: bbo.time,
+                }))
+            } else {
+                Ok(None)
             }
-        }
-        Ok(None)
-    }
-
-    fn parse_l2_book(val: &Value) -> Result<Option<StreamEvent>, DexError> {
-        if let Ok(book) = serde_json::from_value::<L2BookData>(val["data"].clone()) {
-            let bids: Result<Vec<_>, DexError> = book.levels[0]
-                .iter()
-                .map(|level| -> Result<OrderBookLevel, DexError> {
-                    Ok(OrderBookLevel {
-                        price: price(
-                            level
-                                .px
-                                .parse()
-                                .map_err(|_| DexError::Parse("Invalid L2 bid price".into()))?,
-                        ),
-                        qty: qty(level
-                            .sz
-                            .parse()
-                            .map_err(|_| DexError::Parse("Invalid L2 bid quantity".into()))?),
-                        n: level.n,
-                    })
-                })
-                .collect();
-            let bids = bids?;
-
-            let asks: Result<Vec<_>, DexError> = book.levels[1]
-                .iter()
-                .map(|level| -> Result<OrderBookLevel, DexError> {
-                    Ok(OrderBookLevel {
-                        price: price(
-                            level
-                                .px
-                                .parse()
-                                .map_err(|_| DexError::Parse("Invalid L2 ask price".into()))?,
-                        ),
-                        qty: qty(level
-                            .sz
-                            .parse()
-                            .map_err(|_| DexError::Parse("Invalid L2 ask quantity".into()))?),
-                        n: level.n,
-                    })
-                })
-                .collect();
-            let asks = asks?;
-
-            let orderbook = OrderBook {
-                coin: book.coin,
-                ts: book.time,
-                bids,
-                asks,
-            };
-
-            Ok(Some(StreamEvent::L2(orderbook)))
         } else {
             Ok(None)
         }
     }
 
-    fn parse_orders(val: &Value) -> Result<Option<StreamEvent>, DexError> {
-        if let Ok(order_updates) = serde_json::from_value::<Vec<OrderUpdate>>(val["data"].clone()) {
-            if let Some(update) = order_updates.into_iter().next() {
-                let order_event = OrderEvent {
-                    coin: update.order.coin,
-                    side: update.order.side,
-                    limit_px: update.order.limit_px,
-                    sz: update.order.sz,
-                    oid: update.order.oid,
-                    status: update.status,
-                    timestamp: update.status_timestamp,
-                    order_timestamp: update.order.timestamp,
-                };
-                return Ok(Some(StreamEvent::Order(order_event)));
+    fn parse_trades_simd(val: &BorrowedValue) -> Result<Option<StreamEvent>, DexError> {
+        if let Some(data) = val.get("data") {
+            if let Ok(trades) =
+                simd_json::serde::from_borrowed_value::<Vec<TradeDataBorrowed>>(data.clone())
+            {
+                if let Some(trade_data) = trades.into_iter().next() {
+                    let trade = Trade {
+                        id: trade_data.hash.to_string(),
+                        ts: trade_data.time,
+                        side: if trade_data.side == "B" {
+                            Side::Buy
+                        } else {
+                            Side::Sell
+                        },
+                        price: price(
+                            trade_data
+                                .px
+                                .parse()
+                                .map_err(|_| DexError::Parse("Invalid trade price".into()))?,
+                        ),
+                        qty: qty(trade_data
+                            .sz
+                            .parse()
+                            .map_err(|_| DexError::Parse("Invalid trade size".into()))?),
+                        coin: trade_data.coin.to_string(),
+                        tid: trade_data.tid,
+                    };
+                    return Ok(Some(StreamEvent::Trade(trade)));
+                }
             }
         }
         Ok(None)
     }
 
-    fn parse_fills(val: &Value) -> Result<Option<StreamEvent>, DexError> {
-        if let Ok(fills_data) = serde_json::from_value::<UserFillsData>(val["data"].clone()) {
-            if let Some(fill) = fills_data.fills.into_iter().next() {
-                let fill_event = FillEvent {
-                    coin: fill.coin,
-                    side: fill.side,
-                    px: fill.px,
-                    sz: fill.sz,
-                    oid: fill.oid,
-                    tid: fill.tid,
-                    time: fill.time,
-                    fee: fill.fee,
-                    hash: fill.hash,
-                    user: fills_data.user,
+    fn parse_l2_book_simd(val: &BorrowedValue) -> Result<Option<StreamEvent>, DexError> {
+        if let Some(data) = val.get("data") {
+            if let Ok(book) =
+                simd_json::serde::from_borrowed_value::<L2BookDataBorrowed>(data.clone())
+            {
+                let bids: Result<Vec<_>, DexError> =
+                    book.levels[0]
+                        .iter()
+                        .map(|level| -> Result<OrderBookLevel, DexError> {
+                            Ok(OrderBookLevel {
+                                price: price(
+                                    level.px.parse().map_err(|_| {
+                                        DexError::Parse("Invalid L2 bid price".into())
+                                    })?,
+                                ),
+                                qty: qty(level.sz.parse().map_err(|_| {
+                                    DexError::Parse("Invalid L2 bid quantity".into())
+                                })?),
+                                n: level.n,
+                            })
+                        })
+                        .collect();
+                let bids = bids?;
+
+                let asks: Result<Vec<_>, DexError> =
+                    book.levels[1]
+                        .iter()
+                        .map(|level| -> Result<OrderBookLevel, DexError> {
+                            Ok(OrderBookLevel {
+                                price: price(
+                                    level.px.parse().map_err(|_| {
+                                        DexError::Parse("Invalid L2 ask price".into())
+                                    })?,
+                                ),
+                                qty: qty(level.sz.parse().map_err(|_| {
+                                    DexError::Parse("Invalid L2 ask quantity".into())
+                                })?),
+                                n: level.n,
+                            })
+                        })
+                        .collect();
+                let asks = asks?;
+
+                let orderbook = OrderBook {
+                    coin: book.coin.to_string(),
+                    ts: book.time,
+                    bids,
+                    asks,
                 };
-                return Ok(Some(StreamEvent::Fill(fill_event)));
+
+                Ok(Some(StreamEvent::L2(orderbook)))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn parse_orders_simd(val: &BorrowedValue) -> Result<Option<StreamEvent>, DexError> {
+        if let Some(data) = val.get("data") {
+            if let Ok(order_updates) =
+                simd_json::serde::from_borrowed_value::<Vec<OrderUpdateBorrowed>>(data.clone())
+            {
+                if let Some(update) = order_updates.into_iter().next() {
+                    let order_event = OrderEvent {
+                        coin: update.order.coin.to_string(),
+                        side: update.order.side.to_string(),
+                        limit_px: update.order.limit_px.to_string(),
+                        sz: update.order.sz.to_string(),
+                        oid: update.order.oid,
+                        status: update.status.to_string(),
+                        timestamp: update.status_timestamp,
+                        order_timestamp: update.order.timestamp,
+                    };
+                    return Ok(Some(StreamEvent::Order(order_event)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn parse_fills_simd(val: &BorrowedValue) -> Result<Option<StreamEvent>, DexError> {
+        if let Some(data) = val.get("data") {
+            if let Ok(fills_data) =
+                simd_json::serde::from_borrowed_value::<UserFillsDataBorrowed>(data.clone())
+            {
+                if let Some(fill) = fills_data.fills.into_iter().next() {
+                    let fill_event = FillEvent {
+                        coin: fill.coin.to_string(),
+                        side: fill.side.to_string(),
+                        px: fill.px.to_string(),
+                        sz: fill.sz.to_string(),
+                        oid: fill.oid,
+                        tid: fill.tid,
+                        time: fill.time,
+                        fee: fill.fee.to_string(),
+                        hash: fill.hash.to_string(),
+                        user: fills_data.user.to_string(),
+                    };
+                    return Ok(Some(StreamEvent::Fill(fill_event)));
+                }
             }
         }
         Ok(None)
@@ -418,16 +443,18 @@ mod tests {
 
     #[test]
     fn test_bbo_parsing() {
-        let mock_message = json!({
+        let mock_message_str = r#"{
             "data": {
                 "coin": "BTC",
                 "time": 1234567890,
                 "bestBid": "50000.5",
                 "bestAsk": "50001.2"
             }
-        });
+        }"#;
+        let mut bytes = mock_message_str.as_bytes().to_vec();
+        let mock_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
 
-        let result = HlWs::<DummyTransport>::parse_bbo(&mock_message).unwrap();
+        let result = HlWs::<DummyTransport>::parse_bbo_simd(&mock_message).unwrap();
 
         if let Some(StreamEvent::Bbo {
             coin,
@@ -447,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_trades_parsing() {
-        let mock_message = json!({
+        let mock_message_str = r#"{
             "data": [{
                 "coin": "BTC",
                 "side": "B",
@@ -457,9 +484,11 @@ mod tests {
                 "hash": "abcdef123456",
                 "tid": 12345
             }]
-        });
+        }"#;
+        let mut bytes = mock_message_str.as_bytes().to_vec();
+        let mock_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
 
-        let result = HlWs::<DummyTransport>::parse_trades(&mock_message).unwrap();
+        let result = HlWs::<DummyTransport>::parse_trades_simd(&mock_message).unwrap();
 
         if let Some(StreamEvent::Trade(trade)) = result {
             assert_eq!(trade.id, "abcdef123456");
@@ -474,18 +503,20 @@ mod tests {
 
     #[test]
     fn test_l2_book_parsing() {
-        let mock_message = json!({
+        let mock_message_str = r#"{
             "data": {
                 "coin": "BTC",
                 "time": 1234567890,
                 "levels": [
-                    [{"px": "50000.0", "sz": "0.5", "n": 1}, {"px": "49999.0", "sz": "1.0", "n": 2}], // bids
-                    [{"px": "50001.0", "sz": "0.3", "n": 1}, {"px": "50002.0", "sz": "0.7", "n": 1}]  // asks
+                    [{"px": "50000.0", "sz": "0.5", "n": 1}, {"px": "49999.0", "sz": "1.0", "n": 2}],
+                    [{"px": "50001.0", "sz": "0.3", "n": 1}, {"px": "50002.0", "sz": "0.7", "n": 1}]
                 ]
             }
-        });
+        }"#;
+        let mut bytes = mock_message_str.as_bytes().to_vec();
+        let mock_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
 
-        let result = HlWs::<DummyTransport>::parse_l2_book(&mock_message).unwrap();
+        let result = HlWs::<DummyTransport>::parse_l2_book_simd(&mock_message).unwrap();
 
         if let Some(StreamEvent::L2(orderbook)) = result {
             assert_eq!(orderbook.coin, "BTC");
@@ -507,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_order_updates_parsing() {
-        let mock_message = json!({
+        let mock_message_str = r#"{
             "data": [{
                 "order": {
                     "coin": "BTC",
@@ -520,9 +551,11 @@ mod tests {
                 "status": "open",
                 "statusTimestamp": 1234567891
             }]
-        });
+        }"#;
+        let mut bytes = mock_message_str.as_bytes().to_vec();
+        let mock_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
 
-        let result = HlWs::<DummyTransport>::parse_orders(&mock_message).unwrap();
+        let result = HlWs::<DummyTransport>::parse_orders_simd(&mock_message).unwrap();
 
         if let Some(StreamEvent::Order(order_event)) = result {
             assert_eq!(order_event.coin, "BTC");
@@ -539,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_user_fills_parsing() {
-        let mock_message = json!({
+        let mock_message_str = r#"{
             "data": {
                 "user": "0x1234567890abcdef1234567890abcdef12345678",
                 "fills": [{
@@ -554,9 +587,11 @@ mod tests {
                     "hash": "abcdef123456"
                 }]
             }
-        });
+        }"#;
+        let mut bytes = mock_message_str.as_bytes().to_vec();
+        let mock_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
 
-        let result = HlWs::<DummyTransport>::parse_fills(&mock_message).unwrap();
+        let result = HlWs::<DummyTransport>::parse_fills_simd(&mock_message).unwrap();
 
         if let Some(StreamEvent::Fill(fill_event)) = result {
             assert_eq!(fill_event.coin, "BTC");
@@ -576,18 +611,21 @@ mod tests {
     #[test]
     fn test_invalid_message_handling() {
         // Test empty data
-        let empty_message = json!({});
-        let result = HlWs::<DummyTransport>::parse_bbo(&empty_message).unwrap();
+        let empty_message_str = r#"{}"#;
+        let mut bytes = empty_message_str.as_bytes().to_vec();
+        let empty_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
+        let result = HlWs::<DummyTransport>::parse_bbo_simd(&empty_message).unwrap();
         assert!(result.is_none());
 
         // Test malformed data
-        let malformed_message = json!({
+        let malformed_message_str = r#"{
             "data": {
                 "coin": "BTC"
-                // missing required fields
             }
-        });
-        let result = HlWs::<DummyTransport>::parse_bbo(&malformed_message).unwrap();
+        }"#;
+        let mut bytes = malformed_message_str.as_bytes().to_vec();
+        let malformed_message = simd_json::to_borrowed_value(&mut bytes).unwrap();
+        let result = HlWs::<DummyTransport>::parse_bbo_simd(&malformed_message).unwrap();
         assert!(result.is_none());
     }
 
