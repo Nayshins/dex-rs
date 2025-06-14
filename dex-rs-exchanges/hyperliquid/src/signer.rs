@@ -37,9 +37,10 @@ impl HlSigner {
         ord: &OrderReq,
         nonce: u64,
         asset_index: u32,
+        cloid: &str,
     ) -> Result<String, DexError> {
-        let action = OrderAction::from_req(ord, nonce, asset_index);
-        let user_signed_action = UserSignedAction { action };
+        let action = OrderAction::from_req(ord, asset_index, cloid);
+        let user_signed_action = UserSignedAction { action, nonce };
 
         // Hyperliquid requires MessagePack encoding before signing
         let msgpack_bytes = rmp_serde::to_vec(&user_signed_action)
@@ -62,6 +63,7 @@ impl HlSigner {
 #[derive(Debug, Serialize)]
 struct UserSignedAction {
     action: OrderAction,
+    nonce: u64,
 }
 
 /// Order action payload - field order is critical for MessagePack
@@ -81,7 +83,7 @@ struct Order {
     s: String,    // size
     r: bool,      // reduce_only
     t: OrderType, // order type
-    c: String,    // client_order_id (nonce)
+    c: String,    // client_order_id
 }
 
 #[derive(Debug, Serialize)]
@@ -95,7 +97,7 @@ struct LimitOrder {
 }
 
 impl OrderAction {
-    fn from_req(req: &OrderReq, nonce: u64, asset_index: u32) -> Self {
+    fn from_req(req: &OrderReq, asset_index: u32, cloid: &str) -> Self {
         let order = Order {
             a: asset_index,
             b: req.is_buy,
@@ -111,7 +113,7 @@ impl OrderAction {
                     },
                 },
             },
-            c: nonce.to_string(),
+            c: cloid.to_string(),
         };
 
         OrderAction {
@@ -158,9 +160,10 @@ mod tests {
             qty: qty(0.001),
             tif: Tif::Gtc,
             reduce_only: false,
+            cloid: None,
         };
 
-        let action = OrderAction::from_req(&order_req, 12345, 0);
+        let action = OrderAction::from_req(&order_req, 0, "test_cloid_123");
 
         assert_eq!(action.action_type, "order");
         assert_eq!(action.grouping, "na");
@@ -173,7 +176,7 @@ mod tests {
         assert_eq!(order.s, "0.001");
         assert_eq!(order.r, false);
         assert_eq!(order.t.limit.tif, "Gtc");
-        assert_eq!(order.c, "12345");
+        assert_eq!(order.c, "test_cloid_123");
     }
 
     #[test]
@@ -188,9 +191,10 @@ mod tests {
                 qty: qty(0.001),
                 tif,
                 reduce_only: false,
+                cloid: None,
             };
 
-            let action = OrderAction::from_req(&order_req, 0, 0);
+            let action = OrderAction::from_req(&order_req, 0, "cloid");
             assert_eq!(action.orders[0].t.limit.tif, expected);
         }
     }
@@ -204,10 +208,14 @@ mod tests {
             qty: qty(0.001),
             tif: Tif::Gtc,
             reduce_only: false,
+            cloid: None,
         };
 
-        let action = OrderAction::from_req(&order_req, 12345, 0);
-        let user_signed_action = UserSignedAction { action };
+        let action = OrderAction::from_req(&order_req, 0, "test_cloid");
+        let user_signed_action = UserSignedAction {
+            action,
+            nonce: 12345,
+        };
 
         // Should serialize to MessagePack without error
         let result = rmp_serde::to_vec(&user_signed_action);
@@ -228,9 +236,10 @@ mod tests {
             qty: qty(0.001),
             tif: Tif::Gtc,
             reduce_only: false,
+            cloid: None,
         };
 
-        let result = signer.sign_order(&order_req, 12345, 0).await;
+        let result = signer.sign_order(&order_req, 12345, 0, "test_cloid").await;
         assert!(result.is_ok());
 
         let signature = result.unwrap();

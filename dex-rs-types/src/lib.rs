@@ -1,5 +1,7 @@
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Wrapper helpers – panic on NaN only during construction.
 pub type Price = NotNan<f64>;
@@ -13,6 +15,20 @@ pub fn price(v: f64) -> Price {
 #[inline]
 pub fn qty(v: f64) -> Qty {
     NotNan::new(v).expect("NaN qty")
+}
+
+static CLOID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a unique client order ID using timestamp + counter
+/// Format: {timestamp_nanos}_{counter}
+/// Example: "1701234567890123456_42"
+pub fn generate_cloid() -> String {
+    let timestamp_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    let counter = CLOID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{timestamp_nanos}_{counter}")
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,10 +79,17 @@ pub struct OrderReq {
     pub qty: Qty,
     pub tif: Tif,
     pub reduce_only: bool,
+    pub cloid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OrderId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrderResponse {
+    pub order_id: OrderId,
+    pub client_order_id: String,
+}
 
 /* -------- extended API types -------- */
 
@@ -353,5 +376,29 @@ mod tests {
         let j = serde_json::to_string(&t).unwrap();
         let back: Trade = serde_json::from_str(&j).unwrap();
         assert_eq!(t, back);
+    }
+
+    #[test]
+    fn test_generate_cloid() {
+        let cloid1 = generate_cloid();
+        let cloid2 = generate_cloid();
+
+        // Should be unique
+        assert_ne!(cloid1, cloid2);
+
+        // Should contain underscore separator
+        assert!(cloid1.contains('_'));
+        assert!(cloid2.contains('_'));
+
+        // Should be parseable as timestamp_counter
+        let parts1: Vec<&str> = cloid1.split('_').collect();
+        let parts2: Vec<&str> = cloid2.split('_').collect();
+        assert_eq!(parts1.len(), 2);
+        assert_eq!(parts2.len(), 2);
+
+        // Counter should increment
+        let counter1: u64 = parts1[1].parse().unwrap();
+        let counter2: u64 = parts2[1].parse().unwrap();
+        assert_eq!(counter2, counter1 + 1);
     }
 }

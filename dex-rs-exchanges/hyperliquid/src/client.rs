@@ -26,9 +26,6 @@ fn now_timestamp_ms() -> u64 {
 pub(crate) fn next_nonce() -> u64 {
     let nonce = CUR_NONCE.fetch_add(1, Ordering::Relaxed);
     let now_ms = now_timestamp_ms();
-    if nonce > now_ms + 1000 {
-        eprintln!("nonce progressed too far ahead {} {}", nonce, now_ms);
-    }
     // more than 300 seconds behind
     if nonce + 300000 < now_ms {
         CUR_NONCE.fetch_max(now_ms, Ordering::Relaxed);
@@ -134,20 +131,28 @@ impl PerpDex for Hyperliquid {
     }
 
     /* ---- account ---- */
-    async fn place_order(&self, req: OrderReq) -> Result<OrderId, DexError> {
+    async fn place_order(&self, mut req: OrderReq) -> Result<OrderResponse, DexError> {
         let signer = self
             .signer
             .as_ref()
             .ok_or(DexError::Unsupported("signer required"))?;
+
+        // Generate cloid if not provided
+        let cloid = req.cloid.get_or_insert_with(generate_cloid).clone();
+
         let nonce = next_nonce();
         let asset_index = self.get_asset_index(&req.coin).await?;
-        let sig = signer.sign_order(&req, nonce, asset_index).await?;
+        let sig = signer.sign_order(&req, nonce, asset_index, &cloid).await?;
         let payload = serde_json::json!({ "type": "order", "orders": [req], "grouping": "na", "signature": sig });
         let resp = self.rest.place_order(payload).await?;
         let oid = resp["data"]["statuses"][0]["resting"]["oid"]
             .as_u64()
             .ok_or_else(|| DexError::Parse("Failed to parse order ID from response".into()))?;
-        Ok(OrderId(oid.to_string()))
+
+        Ok(OrderResponse {
+            order_id: OrderId(oid.to_string()),
+            client_order_id: cloid,
+        })
     }
 
     async fn cancel(&self, id: OrderId) -> Result<(), DexError> {
@@ -355,7 +360,7 @@ mod tests {
 
         // Test wallet hex
         let wallet_builder = HyperliquidBuilder::default()
-            .wallet_hex("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+            .private_key("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         assert!(wallet_builder.wallet_hex.is_some());
     }
 
@@ -377,6 +382,7 @@ mod tests {
             qty: qty(0.001),
             tif: Tif::Gtc,
             reduce_only: false,
+            cloid: None,
         };
 
         // Test the payload structure that would be sent

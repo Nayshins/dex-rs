@@ -1,7 +1,10 @@
 [package]
 name    = "dex-rs-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Core abstractions and transport layer for dex-rs"
+license = "MIT"
+repository = "https://github.com/Nayshins/dex-rs"
 
 [dependencies]
 async-trait  = { workspace = true }
@@ -10,7 +13,7 @@ http         = { workspace = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }
 thiserror    = { workspace = true }
-dex-rs-types = { path = "../dex-rs-types" }
+dex-rs-types = { path = "../dex-rs-types", version = "0.2.0" }
 # Optional, behind features
 tokio        = { workspace = true, optional = true, features = ["macros","rt","time"] }
 reqwest      = { workspace = true, optional = true }

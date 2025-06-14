@@ -1,7 +1,10 @@
 [package]
 name = "dex-rs-types"
-version = "0.1.0"
-edition = "2024"
+version = "0.2.0"
+edition = "2021"
+description = "Common type definitions for dex-rs cryptocurrency trading library"
+license = "MIT"
+repository = "https://github.com/Nayshins/dex-rs"
 
 [dependencies]
 serde = { workspace = true }

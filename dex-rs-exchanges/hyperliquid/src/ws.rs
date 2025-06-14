@@ -152,14 +152,10 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                     Ok(_) => {
                         // Connection ended normally, reset retry count
                         retry_count = 0;
-                        eprintln!("WebSocket connection ended, attempting to reconnect...");
                     }
-                    Err(e) => {
+                    Err(_) => {
                         retry_count += 1;
-                        eprintln!("WebSocket error (attempt {}): {:?}", retry_count, e);
-
                         if retry_count >= MAX_RETRIES {
-                            eprintln!("Max retries reached, giving up on WebSocket connection");
                             break;
                         }
                     }
@@ -174,7 +170,6 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
                 let jitter = (retry_count as u64 * 137) % (delay_ms / 4 + 1); // Add up to 25% jitter
                 let total_delay = delay_ms + jitter;
 
-                eprintln!("Waiting {}ms before reconnecting...", total_delay);
                 sleep(Duration::from_millis(total_delay)).await;
             }
         });
@@ -195,8 +190,11 @@ impl<T: WsTransport + Clone + 'static> HlWs<T> {
         loop {
             match ws.read_message().await {
                 Ok(bytes) => {
-                    if let Err(e) = Self::handle_message(&bytes, out, stream_kind).await {
-                        eprintln!("Error handling WebSocket message: {}", e);
+                    if Self::handle_message(&bytes, out, stream_kind)
+                        .await
+                        .is_err()
+                    {
+                        // Ignore parse errors and continue
                     }
                 }
                 Err(e) => {

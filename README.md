@@ -74,10 +74,12 @@ async fn main() -> DexResult<()> {
         qty: qty(0.001),
         tif: Tif::Gtc,
         reduce_only: false,
+        cloid: None,  // Or Some("my_custom_id".to_string())
     };
     
-    let order_id = hl.place_order(order).await?;
-    println!("Order placed: {:?}", order_id);
+    let resp = hl.place_order(order).await?;
+    println!("Order placed - Exchange ID: {}, Client ID: {}", 
+             resp.order_id.0, resp.client_order_id);
     
     // Check positions
     let positions = hl.positions().await?;
@@ -87,6 +89,34 @@ async fn main() -> DexResult<()> {
     
     Ok(())
 }
+```
+
+### Client Order IDs
+
+The library supports client order IDs (clOrdIds) for order tracking:
+
+```rust
+use dex_rs::prelude::*;
+
+// Use a custom client order ID
+let order = OrderReq {
+    coin: "BTC".to_string(),
+    cloid: Some("my_order_123".to_string()),
+    // ... other fields
+};
+
+// Or generate one automatically
+let cloid = generate_cloid(); // e.g., "1701234567890123456_42"
+let order = OrderReq {
+    coin: "BTC".to_string(),
+    cloid: Some(cloid.clone()),
+    // ... other fields
+};
+
+// The response includes both IDs
+let resp = hl.place_order(order).await?;
+println!("Exchange ID: {}", resp.order_id.0);
+println!("Client ID: {}", resp.client_order_id);
 ```
 
 ## API Reference

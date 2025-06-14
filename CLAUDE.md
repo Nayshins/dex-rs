@@ -1,0 +1,1 @@
+- NEVER USE mainnet in tests

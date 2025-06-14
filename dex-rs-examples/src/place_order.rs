@@ -56,12 +56,14 @@ async fn main() -> DexResult<()> {
         qty: qty(order_size),
         tif: Tif::Gtc,
         reduce_only: false,
+        cloid: None,
     };
 
     match hl.place_order(order_req).await {
-        Ok(order_id) => {
+        Ok(resp) => {
             println!("✅ Order placed successfully!");
-            println!("🆔 Order ID: {}", order_id.0);
+            println!("🆔 Exchange Order ID: {}", resp.order_id.0);
+            println!("🏷️  Client Order ID: {}", resp.client_order_id);
 
             // Wait a moment then check order status
             println!("\n⏳ Waiting 2 seconds then checking order status...");
@@ -98,7 +100,7 @@ async fn main() -> DexResult<()> {
             );
             println!(
                 "💡 You can cancel it using the cancel_order example with order ID: {}",
-                order_id.0
+                resp.order_id.0
             );
         }
         Err(e) => {

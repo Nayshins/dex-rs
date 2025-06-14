@@ -84,7 +84,7 @@ pub trait PerpDex: Send + Sync {
     ) -> Result<Vec<FundingHistory>, DexError>;
 
     /* ---------- account ---------- */
-    async fn place_order(&self, req: OrderReq) -> Result<OrderId, DexError>;
+    async fn place_order(&self, req: OrderReq) -> Result<OrderResponse, DexError>;
     async fn cancel(&self, id: OrderId) -> Result<(), DexError>;
     async fn positions(&self) -> Result<Vec<Position>, DexError>;
 

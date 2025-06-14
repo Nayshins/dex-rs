@@ -18,7 +18,7 @@ async fn fetch_and_trade() {
     let ob = hl.orderbook("BTC", 2).await.unwrap();
     assert_eq!(ob.bids.len(), 2);
 
-    let _id = hl
+    let _resp = hl
         .place_order(OrderReq {
             coin: "BTC".into(),
             is_buy: true,
@@ -26,6 +26,7 @@ async fn fetch_and_trade() {
             qty: qty(0.0001),
             tif: Tif::Ioc,
             reduce_only: false,
+            cloid: None,
         })
         .await
         .unwrap();

@@ -1,12 +1,15 @@
 [package]
 name    = "dex-rs-hyperliquid"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Hyperliquid exchange implementation for dex-rs"
+license = "MIT"
+repository = "https://github.com/Nayshins/dex-rs"
 
 [dependencies]
 # internal
-dex-rs-types = { path = "../../dex-rs-types" }
-dex-rs-core  = { path = "../../dex-rs-core"  }
+dex-rs-types = { path = "../../dex-rs-types", version = "0.2.0" }
+dex-rs-core  = { path = "../../dex-rs-core", version = "0.2.0" }
 
 # workspace re-uses
 serde       = { workspace = true }
