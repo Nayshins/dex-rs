@@ -6,7 +6,7 @@ use dex_rs_types::{price, qty, OrderReq, Tif};
 #[ignore] // set HL_PK env var & remove to run
 async fn fetch_and_trade() {
     let hl = Hyperliquid::builder()
-        .wallet_env("HL_PK")
+        .private_key_env("HL_PK")
         .testnet()
         .connect()
         .await
@@ -57,7 +57,7 @@ async fn test_websocket_streams() {
     use tokio::sync::mpsc;
 
     let hl = Hyperliquid::builder()
-        .wallet_env("HL_PK")
+        .private_key_env("HL_PK")
         .testnet()
         .connect()
         .await
@@ -135,7 +135,7 @@ async fn test_new_market_data_endpoints() {
 #[ignore] // requires valid wallet and live API calls
 async fn test_authenticated_endpoints() {
     let hl = Hyperliquid::builder()
-        .wallet_env("HL_PK")
+        .private_key_env("HL_PK")
         .testnet()
         .connect()
         .await

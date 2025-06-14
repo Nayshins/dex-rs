@@ -146,6 +146,7 @@ pub struct UserFill {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FundingHistory {
     pub coin: String,
+    #[serde(rename = "fundingRate")]
     pub funding_rate: String,
     pub premium: String,
     pub time: u64,
@@ -176,14 +177,23 @@ pub struct UniverseItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AssetCtx {
     pub funding: String,
+    #[serde(rename = "openInterest")]
     pub open_interest: String,
+    #[serde(rename = "prevDayPx")]
     pub prev_day_px: String,
+    #[serde(rename = "dayNtlVlm")]
     pub day_ntl_vlm: String,
-    pub premium: String,
+    pub premium: Option<String>,
+    #[serde(rename = "oraclePx")]
     pub oracle_px: String,
+    #[serde(rename = "markPx")]
     pub mark_px: String,
+    #[serde(rename = "midPx")]
     pub mid_px: Option<String>,
-    pub impact_px: Option<String>,
+    #[serde(rename = "impactPxs")]
+    pub impact_pxs: Option<Vec<String>>,
+    #[serde(rename = "dayBaseVlm")]
+    pub day_base_vlm: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

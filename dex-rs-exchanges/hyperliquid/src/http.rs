@@ -29,14 +29,15 @@ impl HlRest {
         struct RawTrade {
             side: String,
             px: String,
-            qty: String,
+            sz: String,
             time: u64,
             hash: String,
+            tid: u64,
         }
 
         let url = format!("{}/info", self.base);
         let body = Body {
-            kind: "trades",
+            kind: "recentTrades",
             coin,
         };
         let raws: Vec<RawTrade> = self.http.post_json(&url, &body).await?;
@@ -54,11 +55,11 @@ impl HlRest {
                             .map_err(|_| DexError::Parse("Invalid trade price".into()))?,
                     ),
                     qty: qty(r
-                        .qty
+                        .sz
                         .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid trade quantity".into()))?),
                     coin: coin.to_string(),
-                    tid: 0, // HTTP API doesn't provide trade ID
+                    tid: r.tid,
                 })
             })
             .collect();
@@ -74,8 +75,14 @@ impl HlRest {
             coin: &'a str,
         }
         #[derive(Deserialize)]
+        struct Level {
+            px: String,
+            sz: String,
+            n: u32,
+        }
+        #[derive(Deserialize)]
         struct Raw {
-            levels: [Vec<[String; 2]>; 2], // [[bid_px,bid_sz], [ask_px,ask_sz]]
+            levels: [Vec<Level>; 2], // [bids, asks]
             time: u64,
         }
 
@@ -84,26 +91,21 @@ impl HlRest {
             kind: "l2Book",
             coin,
         };
-        let value: serde_json::Value = self.http.post_json(&url, &body).await?;
-        let raw: Raw = serde_json::from_value(
-            value
-                .get(coin.to_uppercase())
-                .ok_or_else(|| DexError::Parse("missing coin".into()))?
-                .clone(),
-        )?;
+        let raw: Raw = self.http.post_json(&url, &body).await?;
 
         let bids: Result<Vec<_>, DexError> = raw.levels[0]
             .iter()
             .map(|l| -> Result<OrderBookLevel, DexError> {
                 Ok(OrderBookLevel {
                     price: price(
-                        l[0].parse::<f64>()
+                        l.px.parse::<f64>()
                             .map_err(|_| DexError::Parse("Invalid bid price".into()))?,
                     ),
-                    qty: qty(l[1]
+                    qty: qty(l
+                        .sz
                         .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid bid quantity".into()))?),
-                    n: 0,
+                    n: l.n,
                 })
             })
             .collect();
@@ -114,13 +116,14 @@ impl HlRest {
             .map(|l| -> Result<OrderBookLevel, DexError> {
                 Ok(OrderBookLevel {
                     price: price(
-                        l[0].parse::<f64>()
+                        l.px.parse::<f64>()
                             .map_err(|_| DexError::Parse("Invalid ask price".into()))?,
                     ),
-                    qty: qty(l[1]
+                    qty: qty(l
+                        .sz
                         .parse::<f64>()
                         .map_err(|_| DexError::Parse("Invalid ask quantity".into()))?),
-                    n: 0,
+                    n: l.n,
                 })
             })
             .collect();
@@ -365,7 +368,11 @@ impl HlRest {
             kind: "allMids",
             dex,
         };
-        self.http.post_json(&url, &body).await
+
+        // API returns flat object, need to wrap in AllMids struct
+        let mids: std::collections::HashMap<String, String> =
+            self.http.post_json(&url, &body).await?;
+        Ok(AllMids { mids })
     }
 
     /// Get perpetual market metadata
@@ -378,9 +385,52 @@ impl HlRest {
             dex: Option<&'a str>,
         }
 
+        #[derive(Deserialize)]
+        struct UniverseEntry {
+            name: String,
+            #[serde(rename = "szDecimals")]
+            sz_decimals: u32,
+            #[serde(rename = "maxLeverage")]
+            max_leverage: u32,
+            #[serde(rename = "onlyIsolated", default)]
+            only_isolated: bool,
+        }
+
+        #[derive(Deserialize)]
+        struct RawMeta {
+            universe: Vec<UniverseEntry>,
+        }
+
         let url = format!("{}/info", self.base);
         let body = Body { kind: "meta", dex };
-        self.http.post_json(&url, &body).await
+        let raw: RawMeta = self.http.post_json(&url, &body).await?;
+
+        // Convert universe entries to assets
+        let assets: Vec<AssetMeta> = raw
+            .universe
+            .iter()
+            .map(|u| AssetMeta {
+                name: u.name.clone(),
+                sz_decimals: u.sz_decimals,
+                max_leverage: u.max_leverage,
+                only_isolated: u.only_isolated,
+            })
+            .collect();
+
+        // Create simple universe items with indices
+        let universe: Vec<UniverseItem> = raw
+            .universe
+            .iter()
+            .enumerate()
+            .map(|(i, u)| UniverseItem {
+                name: u.name.clone(),
+                index: i as u32,
+                tokens: vec![],
+                is_canonical: true,
+            })
+            .collect();
+
+        Ok(UniverseMeta { assets, universe })
     }
 
     /// Get perpetual market metadata with asset contexts
@@ -395,7 +445,71 @@ impl HlRest {
         let body = Body {
             kind: "metaAndAssetCtxs",
         };
-        self.http.post_json(&url, &body).await
+
+        // API returns [meta, contexts] array
+        let response: serde_json::Value = self.http.post_json(&url, &body).await?;
+        let arr = response
+            .as_array()
+            .ok_or_else(|| DexError::Parse("Expected array response".into()))?;
+
+        if arr.len() != 2 {
+            return Err(DexError::Parse("Expected 2-element array".into()));
+        }
+
+        // Parse meta (first element)
+        let meta = self.parse_meta_from_value(&arr[0])?;
+
+        // Parse contexts (second element)
+        let asset_ctxs: Vec<AssetCtx> = serde_json::from_value(arr[1].clone())?;
+
+        Ok(MetaAndAssetCtxs { meta, asset_ctxs })
+    }
+
+    fn parse_meta_from_value(&self, value: &serde_json::Value) -> Result<UniverseMeta, DexError> {
+        #[derive(Deserialize)]
+        struct UniverseEntry {
+            name: String,
+            #[serde(rename = "szDecimals")]
+            sz_decimals: u32,
+            #[serde(rename = "maxLeverage")]
+            max_leverage: u32,
+            #[serde(rename = "onlyIsolated", default)]
+            only_isolated: bool,
+        }
+
+        #[derive(Deserialize)]
+        struct RawMeta {
+            universe: Vec<UniverseEntry>,
+        }
+
+        let raw: RawMeta = serde_json::from_value(value.clone())?;
+
+        // Convert universe entries to assets
+        let assets: Vec<AssetMeta> = raw
+            .universe
+            .iter()
+            .map(|u| AssetMeta {
+                name: u.name.clone(),
+                sz_decimals: u.sz_decimals,
+                max_leverage: u.max_leverage,
+                only_isolated: u.only_isolated,
+            })
+            .collect();
+
+        // Create simple universe items with indices
+        let universe: Vec<UniverseItem> = raw
+            .universe
+            .iter()
+            .enumerate()
+            .map(|(i, u)| UniverseItem {
+                name: u.name.clone(),
+                index: i as u32,
+                tokens: vec![],
+                is_canonical: true,
+            })
+            .collect();
+
+        Ok(UniverseMeta { assets, universe })
     }
 
     /// Get spot market metadata

@@ -1,35 +1,35 @@
 use dex_rs::prelude::*;
-use tokio::sync::mpsc;
 use std::env;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> DexResult<()> {
     env_logger::init();
-    
+
     // Get private key from environment variable
     let private_key = env::var("HYPERLIQUID_PRIVATE_KEY")
         .expect("Please set HYPERLIQUID_PRIVATE_KEY environment variable");
-    
+
     println!("🔗 Connecting to Hyperliquid testnet with authentication...");
     let hl = Hyperliquid::builder()
         .testnet()
-        .credentials(&private_key)
+        .private_key(&private_key)
         .connect()
         .await?;
-    
+
     println!("👤 Subscribing to user events (orders and fills)...");
     println!("Press Ctrl+C to exit\n");
-    
+
     // Subscribe to both order updates and fills
     let (order_tx, mut order_rx) = mpsc::unbounded_channel();
     let (fill_tx, mut fill_rx) = mpsc::unbounded_channel();
-    
+
     hl.subscribe(StreamKind::Orders, None, order_tx).await?;
     hl.subscribe(StreamKind::Fills, None, fill_tx).await?;
-    
+
     println!("🎯 Listening for order updates and fills...");
     println!("{:=<80}", "");
-    
+
     loop {
         tokio::select! {
             order_event = order_rx.recv() => {
@@ -38,7 +38,7 @@ async fn main() -> DexResult<()> {
                         let time = chrono::DateTime::from_timestamp_millis(order.timestamp as i64)
                             .unwrap_or_default()
                             .format("%H:%M:%S");
-                        
+
                         let status_emoji = match order.status.as_str() {
                             "open" => "🟡",
                             "filled" => "🟢",
@@ -46,7 +46,7 @@ async fn main() -> DexResult<()> {
                             "rejected" => "❌",
                             _ => "⚪",
                         };
-                        
+
                         println!("📋 ORDER UPDATE [{}]", time);
                         println!("   {} Status: {}", status_emoji, order.status.to_uppercase());
                         println!("   🪙 Asset: {}", order.coin);
@@ -54,7 +54,7 @@ async fn main() -> DexResult<()> {
                         println!("   💰 Price: ${}", order.limit_px);
                         println!("   📏 Size: {}", order.sz);
                         println!("   🆔 Order ID: {}", order.oid);
-                        
+
                         let order_time = chrono::DateTime::from_timestamp_millis(order.order_timestamp as i64)
                             .unwrap_or_default()
                             .format("%H:%M:%S");
@@ -68,20 +68,20 @@ async fn main() -> DexResult<()> {
                     }
                 }
             }
-            
+
             fill_event = fill_rx.recv() => {
                 match fill_event {
                     Some(StreamEvent::Fill(fill)) => {
                         let time = chrono::DateTime::from_timestamp_millis(fill.time as i64)
                             .unwrap_or_default()
                             .format("%H:%M:%S");
-                        
+
                         let side_emoji = match fill.side.as_str() {
                             "B" => "🟢 BUY",
                             "A" => "🔴 SELL",
                             _ => &fill.side,
                         };
-                        
+
                         println!("💵 FILL EXECUTED [{}]", time);
                         println!("   {} {}", side_emoji, fill.coin);
                         println!("   💰 Fill Price: ${}", fill.px);
@@ -102,6 +102,6 @@ async fn main() -> DexResult<()> {
             }
         }
     }
-    
+
     Ok(())
 }

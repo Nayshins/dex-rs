@@ -74,13 +74,13 @@ impl HyperliquidBuilder {
         self.testnet = true;
         self
     }
-    pub fn wallet_hex(mut self, pk: impl Into<String>) -> Self {
-        self.wallet_hex = Some(pk.into());
+    pub fn private_key(mut self, private_key: impl Into<String>) -> Self {
+        self.wallet_hex = Some(private_key.into());
         self
     }
-    pub fn wallet_env(self, var: &str) -> Self {
-        let pk = std::env::var(var).expect("env var missing");
-        self.wallet_hex(pk)
+    pub fn private_key_env(self, env_var: &str) -> Self {
+        let private_key = std::env::var(env_var).expect("env var missing");
+        self.private_key(private_key)
     }
 
     pub async fn connect(self) -> Result<Hyperliquid, DexError> {
